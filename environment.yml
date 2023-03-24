@@ -1,0 +1,12 @@
+name: streamlit
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - streamlit
+  - biopython
+  - ca-certificates
+  - certifi
+  - openssl
+prefix: /home/erick/miniconda3/envs/streamlit
