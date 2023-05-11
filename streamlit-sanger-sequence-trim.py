@@ -8,8 +8,11 @@ __version__ = "1.0.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
+import streamlit_ext as ste
 import pandas as pd
 # --------------------------------------------------
+import plotly.graph_objects as go
+import math
 from Bio import SeqIO
 from datetime import datetime
 import zipfile
@@ -26,7 +29,12 @@ class App:
         """
         Function instantiates the main page.
         """
-        st.set_page_config(page_title='sanger-sequence-trim', initial_sidebar_state='collapsed')
+        title = "sanger-sequence-trim"
+        st.set_page_config(
+            page_title=f"abi-sauce | {title}",
+            page_icon=':apple:',
+            layout='wide',
+            initial_sidebar_state='collapsed')
         st.title('sanger-sequence-trim')
         st.markdown('This script is intended for processing a `.ab1` files into Mott algorithm-trimmed FASTAs.')
         st.markdown('Check out the better-maintained command-line interface on [GitHub](https://github.com/KPU-AGC/general-resources/blob/main/sanger-processing/sanger-sequence-trim.py)!')
@@ -78,12 +86,23 @@ class App:
                 with st.spinner('Trimming...'):
                     time.sleep(0.5)
                 form_instance.empty()
-                self._init_dataframe(self._loaded_abi_files)
-                button = st.download_button(
+                
+                button = ste.download_button(
                     label="Download ZIP",
                     data=buffer,
                     file_name=f"sanger-sequence-trim_{filename}.zip" 
                 )
+
+                expanders = {}
+                self._init_dataframe(self._loaded_abi_files)
+                for i, file_instance in enumerate(self._loaded_abi_files):
+                    expander_text = f"Show plot: {file_instance}"
+                    expanders[i] = st.expander(expander_text)
+                    #expanders[i].write(self._loaded_abi_files[file_instance])
+                    if expanders[i].expanded:
+                        expanders[i].plotly_chart(self._plot(self._loaded_abi_files[file_instance]), use_container_width=True)
+
+
             if _submitted and not _uploaded_files:
                 st.error('Attach some files first!')
     def _process_seq_object(self, _file) -> None:
@@ -106,6 +125,101 @@ class App:
         self._loaded_abi_files[_file.name] = seq_object_dict
 
         return seq_object_dict
+    def _plot(self, seq_object_dict: dict):
+        """
+        """
+        raw_annotations = seq_object_dict['_raw'].annotations['abif_raw']
+        #trim_annotations = seq_object_dict['_trimmed'].annotations['abif_raw']
+        left_trim = raw_annotations['PLOC2'][seq_object_dict['left_trim']] - raw_annotations['SPAC3']/2
+        right_trim = raw_annotations['PLOC2'][-seq_object_dict['right_trim']] + raw_annotations['SPAC3']/2
+        
+        phred_scores = seq_object_dict['_raw'].letter_annotations['phred_quality']
+        nucleotide_plots = {
+            'A': {
+                'complement': 'T',
+                'peaks': raw_annotations['DATA10'],
+                'color': 'green'},
+            'T': {
+                'complement': 'A',
+                'peaks': raw_annotations['DATA11'],
+                'color': 'red'},
+            'C': {
+                'complement': 'G',
+                'peaks': raw_annotations['DATA12'],
+                'color': 'blue'},
+            'G': {
+                'complement': 'C',
+                'peaks': raw_annotations['DATA9'],
+                'color': 'black'}
+            }
+
+        max_peak_height = max([max(nucleotide_plots[nucleotide]['peaks']) for nucleotide in nucleotide_plots])
+        relative_heights = {
+            'screen_height': max_peak_height+200,
+            'basepos_height': max_peak_height+130,
+            'basecall_height': max_peak_height+75,
+            'highlight_height': max_peak_height+50
+        }
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+            #x=[math.ceil(positions-(widths/2)) for widths, positions in zip(adjusted_dists,raw_annotations['PLOC2'])],
+            x=raw_annotations['PLOC2'],
+            y=[(5/6)*(relative_heights['highlight_height'])*(score/60) for score in phred_scores],
+            hoverinfo='skip',
+            name='Phred scores',
+            width=abs(raw_annotations['SPAC3']),
+            marker=dict(
+                color='#88ccee',
+                opacity=0.3,
+                )
+            ))
+        fig.add_trace(
+            go.Scatter(
+                x=raw_annotations['PLOC2'],
+                y=[relative_heights['basecall_height'] for i in raw_annotations['PLOC2']],
+                hoverinfo='skip',
+                name='Nucleotides',
+                text=list(char for char in raw_annotations['PBAS2'].decode()),
+                mode="text",
+                textfont={
+                    'color': [nucleotide_plots[char]['color'] if char in nucleotide_plots else '#ff3aff' for char in raw_annotations['PBAS2'].decode()]
+                },
+            ))
+        
+        print(seq_object_dict['_raw'].seq)
+        if str(seq_object_dict['_raw'].seq) != 'NNNNN':
+            
+            fig.add_vline(
+                x=left_trim,
+                line_width=2,
+                fillcolor='#88ccee',
+                opacity=0.5)
+            fig.add_vline(
+                x=right_trim,
+                line_width=2,
+                fillcolor='#88ccee',
+                opacity=0.5)
+
+        for nuc, values in nucleotide_plots.items():
+            fig.add_trace(
+                go.Scatter(
+                    y=values['peaks'],
+                    hoverinfo='skip',
+                    line=dict(width=1),
+                    name=nuc,
+                    marker=dict(
+                        size=20,
+                        color=values['color'])))
+
+        fig.update_layout(
+            dragmode='pan',
+            xaxis=dict(rangeslider=dict(visible=True, thickness=0.25), tickvals=[None], range=[left_trim-(10*raw_annotations['SPAC3']), right_trim+(10*raw_annotations['SPAC3'])], constrain='domain'),
+            yaxis=dict(fixedrange=True, tickvals=[None], range=[0, relative_heights['screen_height']]),
+            legend=dict(itemclick=False, itemdoubleclick=False))
+
+        return fig
     def _init_dataframe(self, _abi_data) -> None:
         """
         Function instantiates the DataFrame for a given set of input sequences.
@@ -141,5 +255,5 @@ class App:
             st.caption(f'[@{__author__}](https://github.com/ericksamera)\t|\tv{__version__}\t|\t{__comments__}')
 # --------------------------------------------------
 if __name__=="__main__":
-    ct = App()
-    ct._init_page()
+    streamlit_app = App()
+    streamlit_app._init_page()
