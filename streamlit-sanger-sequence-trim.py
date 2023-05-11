@@ -31,7 +31,15 @@ class App:
             page_icon=':apple:',
             layout='wide',
             initial_sidebar_state='expanded')
-
+        st.markdown(
+            """
+            <style>
+            [data-testid="stSidebar"][aria-expanded="true"]{
+                min-width: 450px;
+                max-width: 450px;
+            }""",
+            unsafe_allow_html=True,
+            )   
         self._init_sidebar()
         if 'UPLOADED_FILES' not in st.session_state: self._init_file_uploader()
         else: self._update_plot_window()
@@ -61,9 +69,6 @@ class App:
                             ],
                         ['Qualitative Score'],
                     )
-
-
-
                     _translate_labels = {
                         'Sequence ID': 'name',
                         'Well Position': 'well',
@@ -93,13 +98,12 @@ class App:
 
                         flags_and_name = '|'.join([str(_flags_dict[i]) for i in st.session_state.FLAGS] + ['']) + st.session_state.PROCESSED_FILES[f'{_seq_name}.ab1']['name']
 
-                        return flags_and_name
-
-                    name_func = lambda x: st.session_state.PROCESSED_FILES[f"{x}.ab1"]['color_code'] + st.session_state.PROCESSED_FILES[f'{x}.ab1']['name']
-                
+                        return flags_and_name                
+                    
+                    st.session_state.SORTED_LIST = sorted(st.session_state.PROCESSED_FILES.values(), reverse=st.session_state.REVERSE_SORT, key=lambda x: x[_translate_labels[st.session_state.TRACE_LIST_SORT]])
                     st.session_state.SELECTED_TRACE = st.radio(
                         'Select trace file to view:', 
-                        options=[seq_object['name'] for seq_object in sorted(st.session_state.PROCESSED_FILES.values(), reverse=st.session_state.REVERSE_SORT, key=lambda x: x[_translate_labels[st.session_state.TRACE_LIST_SORT]])],
+                        options=[seq_object['name'] for seq_object in st.session_state.SORTED_LIST],
                         format_func=lambda x: show_flags_with_name(x, st.session_state.FLAGS))
                 with st.expander('**DOWNLOAD OPTIONS:**'):
                     st.session_state.DEFAULT_FILENAME = 'abi-sauce-trim'
@@ -342,7 +346,6 @@ class App:
             with right_column:
                 """"""
                 #st.markdown(f'Right trim,: {st.session_state.PROCESSED_FILES[f"{st.session_state.SELECTED_TRACE}.ab1"]["right_trim"]+1} nucleotides')
-
 # --------------------------------------------------
 if __name__=="__main__":
     streamlit_app = App()
