@@ -1,3 +1,4 @@
 biopython
 streamlit
 streamlit-ext
+plotly
