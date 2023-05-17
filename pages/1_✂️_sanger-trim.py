@@ -226,7 +226,7 @@ class App:
         """
         raw_annotations = _seq_object_dict['_raw'].annotations['abif_raw']
         #trim_annotations = seq_object_dict['_trimmed'].annotations['abif_raw']
-        left_trim = raw_annotations['PLOC2'][_seq_object_dict['left_trim']] #
+        left_trim = raw_annotations['PLOC2'][_seq_object_dict['left_trim']]
         try: right_trim = raw_annotations['PLOC2'][-_seq_object_dict['right_trim']-2] + raw_annotations['SPAC3']/2
         except IndexError: right_trim = raw_annotations['PLOC2'][-_seq_object_dict['right_trim']] + raw_annotations['SPAC3']/2
         
@@ -250,7 +250,10 @@ class App:
                 'color': 'black'}
             }
 
-        max_peak_height = max([max(nucleotide_plots[nucleotide]['peaks']) for nucleotide in nucleotide_plots])
+        if st.session_state.TRIM_STR == '_trimmed':
+            max_peak_height = max([max(nucleotide_plots[nucleotide]['peaks'][int(left_trim):int(right_trim)]) for nucleotide in nucleotide_plots])
+        else:
+            max_peak_height = max([max(nucleotide_plots[nucleotide]['peaks']) for nucleotide in nucleotide_plots])
         relative_heights = {
             'screen_height': max_peak_height+200,
             'basepos_height': max_peak_height+130,
@@ -309,6 +312,7 @@ class App:
                         color=values['color'])))
 
         fig.update_layout(
+            margin=dict(l=0, r=0, t=50, b=0),
             dragmode='pan',
             xaxis=dict(rangeslider=dict(visible=True, thickness=0.1), tickvals=[None], range=[left_trim-(10*raw_annotations['SPAC3']), right_trim+(10*raw_annotations['SPAC3'])], constrain='domain'),
             yaxis=dict(fixedrange=True, tickvals=[None], range=[0, relative_heights['screen_height']]))
