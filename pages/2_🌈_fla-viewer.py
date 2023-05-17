@@ -276,15 +276,17 @@ class App:
         """
         """
         with st.expander('Individual channels'):
+            st.session_state.SHOW_INDIV_TABLES = st.checkbox("Show table with individual channels", value=True)
             for color, values in [(color, value) for color, value in _trace_dict['channels'].items() if color not in ['orange']] + [('orange', _trace_dict['channels']['orange'])]:
                 if not any([y_val if x_val>50 else None for x_val, y_val in zip(values['x'], values['y']) if x_val]): continue
 
                 st.plotly_chart(
                     self._per_channel_bar_plot(_trace_dict['channels'][color], _trace_dict['peaks'][color]),
                     use_container_width=True)
-                if color not in ('orange'): st.dataframe(_trace_dict['predicted_genotypes'][color], use_container_width=True)
+                if st.session_state.SHOW_INDIV_TABLES:
+                    if color not in ('orange'): st.dataframe(_trace_dict['predicted_genotypes'][color], use_container_width=True)
         
-        with st.expander('Full predicted genotypes'):
+        with st.expander('Predicted genotype'):
             full_genotype_table = []
             for color in _trace_dict['predicted_genotypes']:
                 full_genotype_table += _trace_dict['predicted_genotypes'][color]
