@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for sanger-sequence-trim.
 """
 __author__ = "Erick Samera"
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
@@ -154,23 +154,26 @@ class App:
 
                 processed_files[processed_name]['peaks'][channel_color]['x'] += [middle]
                 processed_files[processed_name]['peaks'][channel_color]['y'] += [height]
-            processed_files[processed_name]['predicted_genotypes'] = self._predict_genotypes(processed_files[processed_name])
+            processed_files[processed_name]['predicted_genotypes'], processed_files[processed_name]['full_genotypes'] = self._predict_genotypes(processed_files[processed_name])
         return processed_files
-    def _predict_genotypes(self, _processed_file_dict: dict) -> None:
+    def _predict_genotypes(self, _processed_file_dict: dict) -> tuple:
         """
         """
         predicted_genotypes_dict = {}
+        full_predicted_genotypes_dict = {}
         for color in _processed_file_dict['peaks']:
             if color in ('orange'): continue
-            if color not in predicted_genotypes_dict: predicted_genotypes_dict[color] = []
+            if color not in predicted_genotypes_dict: 
+                predicted_genotypes_dict[color] = []
+                full_predicted_genotypes_dict[color] = []
             try: max_height = max([y_value for x_value, y_value in zip(_processed_file_dict['peaks'][color]['x'], _processed_file_dict['peaks'][color]['y']) if x_value>50])
             except ValueError: continue
             for x_value, y_value in zip(_processed_file_dict['peaks'][color]['x'], _processed_file_dict['peaks'][color]['y']):
                 if x_value<50: continue
+                full_predicted_genotypes_dict[color].append({'channel': color.upper(), 'position (bp)': f"{x_value:.1f}", 'height': f"{y_value:.0f}"})
                 if y_value > max_height/5:
-                    predicted_genotypes_dict[color].append(
-                        {'channel': color.upper(), 'position (bp)': f"{x_value:.1f}", 'height': f"{y_value:.0f}"})
-        return predicted_genotypes_dict
+                    predicted_genotypes_dict[color].append({'channel': color.upper(), 'position (bp)': f"{x_value:.1f}", 'height': f"{y_value:.0f}"})
+        return predicted_genotypes_dict, full_predicted_genotypes_dict
     def _plot_total_trace(self, _trace_dict):
         """
         """
@@ -276,6 +279,7 @@ class App:
         """
         """
         with st.expander('Individual channels'):
+            st.session_state.FULL_GENOTYPES = st.checkbox("Show all predicted peaks", value=False)
             st.session_state.SHOW_INDIV_TABLES = st.checkbox("Show table with individual channels", value=True)
             for color, values in [(color, value) for color, value in _trace_dict['channels'].items() if color not in ['orange']] + [('orange', _trace_dict['channels']['orange'])]:
                 if not any([y_val if x_val>50 else None for x_val, y_val in zip(values['x'], values['y']) if x_val]): continue
@@ -284,7 +288,7 @@ class App:
                     self._per_channel_bar_plot(_trace_dict['channels'][color], _trace_dict['peaks'][color]),
                     use_container_width=True)
                 if st.session_state.SHOW_INDIV_TABLES:
-                    if color not in ('orange'): st.dataframe(_trace_dict['predicted_genotypes'][color], use_container_width=True)
+                    if color not in ('orange'): st.dataframe(_trace_dict['full_genotypes' if st.session_state.FULL_GENOTYPES else 'predicted_genotypes'][color], use_container_width=True)
         
         with st.expander('Predicted genotype'):
             full_genotype_table = []
