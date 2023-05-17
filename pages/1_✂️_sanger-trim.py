@@ -26,9 +26,10 @@ class App:
         Function instantiates the main page.
         """
         self.title = "sanger-sequence-trim"
+        self.emoji = ':scissors:'
         st.set_page_config(
             page_title=f"abi-sauce | {self.title}",
-            page_icon=':apple:',
+            page_icon=self.emoji,
             layout='wide',
             initial_sidebar_state='expanded')
         st.markdown(
@@ -50,8 +51,8 @@ class App:
         """
     
         with st.sidebar:
-            st.title(f":apple: abi-sauce | {self.title}")
-            st.markdown('This script is intended for processing a `.ab1` files into Mott algorithm-trimmed FASTAs.')
+            st.title(f"{self.emoji} abi-sauce | {self.title}")
+            st.markdown('This script is intended for processing `.ab1` files into Mott algorithm-trimmed FASTAs.')
             st.markdown('Check out the better-maintained command-line interface on [GitHub](https://github.com/KPU-AGC/general-resources/blob/main/sanger-processing/sanger-sequence-trim.py)!')
 
             if 'UPLOADED_FILES' in st.session_state:
