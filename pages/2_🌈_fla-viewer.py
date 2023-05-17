@@ -11,7 +11,6 @@ import streamlit as st
 import streamlit_ext as ste
 # --------------------------------------------------
 import plotly.graph_objects as go
-from streamlit_plotly_events import plotly_events
 from Bio import SeqIO
 import zipfile
 import io
