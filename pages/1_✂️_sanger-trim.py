@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for sanger-sequence-trim.
 """
 __author__ = "Erick Samera"
-__version__ = "1.1.0"
+__version__ = "1.5.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
