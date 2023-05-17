@@ -212,7 +212,8 @@ class App:
                 maxes_no_ladder.append(list_to_add)
             except:continue
         max_ladder = max([i for i in _trace_dict['channels']['orange']['y'] if i])
-        average_height = max(maxes_no_ladder) if max(maxes_no_ladder)>max_ladder else max_ladder
+        try: average_height = max(maxes_no_ladder) if max(maxes_no_ladder)>max_ladder else max_ladder
+        except ValueError: average_height=max_ladder
 
         for color, values in _trace_dict['channels'].items():
             fig.add_trace(
