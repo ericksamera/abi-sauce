@@ -4,15 +4,13 @@ __description__ =\
 Purpose: Streamlit wrapper for sanger-sequence-trim.
 """
 __author__ = "Erick Samera"
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
 import streamlit_ext as ste
 # --------------------------------------------------
 import plotly.graph_objects as go
-from Bio import SeqIO
-import zipfile
 import io
 import csv
 # --------------------------------------------------
@@ -43,7 +41,7 @@ class App:
         self._init_sidebar()
         if 'UPLOADED_FLA' not in st.session_state: self._init_file_uploader()
         else: self._update_plot_window()
-
+        return None
     def _init_sidebar(self) -> None:
         """
         Instantiate the sidebar.
@@ -62,12 +60,6 @@ class App:
                     st.session_state.SELECTED_TRACE = st.radio(
                         'Select trace file to view:', 
                         options=[trace_object['name'] for trace_object in st.session_state.SORTED_LIST])
-                # with st.expander('**DOWNLOAD OPTIONS:**'):
-                #     st.session_state.DEFAULT_FILENAME = 'abi-sauce-trim'
-                #     st.session_state.USER_FILENAME = st.text_input('File name', placeholder='abi-sauce-trim')
-                #     st.session_state.FILENAME =  st.session_state.USER_FILENAME if st.session_state.USER_FILENAME else st.session_state.DEFAULT_FILENAME
-                #     st.session_state.CONCATENATE: bool = st.checkbox("Concatenate entries into single fasta.", value=True)
-                #     if not st.session_state.CONCATENATE: st.caption('Individual FASTAs will be compiled into a single ZIP file.')
             st.divider()
 
             with st.expander('MORE INFO'):
@@ -89,6 +81,7 @@ class App:
                 st.caption(f'[@{__author__}](https://github.com/ericksamera)\t|\tv{__version__}\t|\t{__comments__}')
     def _init_file_uploader(self) -> None:
         """
+        Function initializes file upload handling.
         """
         st.header('Select fragment length analysis (FLA) files (`.fsa.csv`)')
         uploaded_files: list = st.file_uploader(
@@ -102,12 +95,27 @@ class App:
             if submit_button and not uploaded_files:
                 st.error('Select some files!')
     def _upload_files(self, _st_uploaded_files: list) -> None:
+        """
+        Function handles file upload and adds files to cache.
+        """
         if not _st_uploaded_files: return None
         st.session_state.UPLOADED_FLA = [file for file in _st_uploaded_files if 'QCReport' not in file.name]
         st.session_state.PROCESSED_FLA = self._process_files(st.session_state.UPLOADED_FLA)
-    def _process_files(self, _st_uploaded_files) -> None:
+    def _process_files(self, _st_uploaded_files) -> dict:
         """
-        Function creates a new instance of the copied file and processes it.
+        Function creates a dictionary of processed files.
+
+        Parameters:
+            _st_uploaded_files: (list)
+                a list of UploadedFile objects prcoessed by streamlit upload manager
+        
+        Returns:
+            (dict): dictionary of processed files
+                name: sample name
+                channels: (dict) of channel information
+                peaks: (dict) of peak information
+                predicted_genotypes: minimal (list) of genotype (dict)
+                full_genotypes: full (list) of genotype (dict)
         """
         processed_files = {}
 
@@ -158,9 +166,21 @@ class App:
         return processed_files
     def _predict_genotypes(self, _processed_file_dict: dict) -> tuple:
         """
+        Function takes a processed file with channel and peak information and returns genotype results.
+
+        Parameters:
+            _processed_file_dict (dict):
+                dictionary of processed file with channel and peak information
+
+        Returns:
+            (tuple)
+                (dict) containing only predicted genotypes that pass threshold
+                (dict) containing all peaks past 50 bp minimum
         """
         predicted_genotypes_dict = {}
         full_predicted_genotypes_dict = {}
+
+        # for each of the colors, get the max peak height past 50 nt and predict whether it might be a true peak versus signal noise
         for color in _processed_file_dict['peaks']:
             if color in ('orange'): continue
             if color not in predicted_genotypes_dict: 
@@ -275,7 +295,7 @@ class App:
             modebar=dict(remove=[ "autoScale2d", "autoscale", "editInChartStudio", "editinchartstudio", "hoverCompareCartesian", "hovercompare", "lasso", "lasso2d", "orbitRotation", "orbitrotation", "pan", "pan2d", "pan3d", "reset", "resetCameraDefault3d", "resetCameraLastSave3d", "resetGeo", "resetSankeyGroup", "resetScale2d", "resetViewMapbox", "resetViews", "resetcameradefault", "resetcameralastsave", "resetsankeygroup", "resetscale", "resetview", "resetviews", "select", "select2d", "sendDataToCloud", "senddatatocloud", "tableRotation", "tablerotation", "toImage", "toggleHover", "toggleSpikelines", "togglehover", "togglespikelines", "toimage", "zoom", "zoom2d", "zoom3d", "zoomIn2d", "zoomInGeo", "zoomInMapbox", "zoomOut2d", "zoomOutGeo", "zoomOutMapbox", "zoomin", "zoomout"]),
             )
         return fig
-    def _plot_per_channel_traces(self, _trace_dict):
+    def _plot_per_channel_traces(self, _trace_dict) -> None:
         """
         """
         with st.expander('Individual channels'):
@@ -295,7 +315,8 @@ class App:
             for color in _trace_dict['predicted_genotypes']:
                 full_genotype_table += _trace_dict['predicted_genotypes'][color]
             st.dataframe(sorted(full_genotype_table, key=lambda x: float(x['position (bp)']), reverse=False), use_container_width=True)
-    def _update_plot_window(self):
+        return None
+    def _update_plot_window(self) -> None:
         """
         """
         st.header(f"{st.session_state.SELECTED_TRACE}")
@@ -304,30 +325,7 @@ class App:
             self._plot_total_trace(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}"]),
             use_container_width=True)
         self._plot_per_channel_traces(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}"])
-    #     help_str = "Trimmed with Mott's trimming algorithm!" if st.session_state.TRIM_STR == '_trimmed' else "Untrimmed!"
-    #     st.caption(f'FASTA sequence: ({len(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"][st.session_state.TRIM_STR])} bp)', help=help_str)
-    #     st.code(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"][st.session_state.TRIM_STR].format("fasta"))
-    #     if st.session_state.TRIM_STR == '_trimmed':
-    #         with st.expander(f'Untrimmed FASTA ({len(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]["_raw"])} bp):'):
-    #             st.code(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]["_raw"].format("fasta"))
-    #         st.subheader('Trimming statistics')
-    #         left_column, right_column = st.columns(2)
-    #         with left_column:
-    #             l_trim_count: int = st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]["left_trim"]
-    #             r_trim_count: int = st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]["right_trim"]+1
-    #             total_trim_count = l_trim_count+r_trim_count
-
-    #             phred_scores_raw = st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]['_raw'].letter_annotations['phred_quality']
-    #             phred_scores_trimmed = st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}.ab1"]['_trimmed'].letter_annotations['phred_quality']
-
-    #             average_phred_raw = sum(phred_scores_raw)/len(phred_scores_raw)
-    #             average_phred_trimmed = sum(phred_scores_trimmed)/len(phred_scores_trimmed)
-
-    #             st.markdown(f'Left trim: `{l_trim_count}` | Right trim:`{r_trim_count}` (Total: `{total_trim_count}`)', help='The right side is usually worse.')
-    #             st.markdown(f'Average PHRED score (before): `{average_phred_raw:.1f}` | (after) `{average_phred_trimmed:.1f}`')
-
-    #         with right_column:
-    #             """"""
+        return None
 # --------------------------------------------------
 if __name__=="__main__":
     streamlit_app = App()
