@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for sanger-sequence-trim.
 """
 __author__ = "Erick Samera"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
@@ -34,33 +34,23 @@ class App:
             unsafe_allow_html=True,
             )   
         self._init_sidebar()
+        self._init_main_window()
     def _init_sidebar(self) -> None:
         """
         Instantiate the sidebar.
         """
     
         with st.sidebar:
-            st.title(f":apple: abi-sauce | {self.title}")
-            st.markdown('This script is intended for processing a `.ab1` files into Mott algorithm-trimmed FASTAs.')
-            st.markdown('Check out the better-maintained command-line interface on [GitHub](https://github.com/KPU-AGC/general-resources/blob/main/sanger-processing/sanger-sequence-trim.py)!')
-            st.divider()
-
-            with st.expander('MORE INFO'):
-                st.markdown(
-                    'In Sanger sequencing, the beginning and end of the ' 
-                    'electropherogram generally end up a litle messy due to the '
-                    'inherent randomness of the chain-termination method.')
-            
-                st.markdown(
-                    'The low-quality basecalls at the beginning and end of the '
-                    'electropherogram are likely not real -- and therefore not '
-                    'useful for BLAST or variant identification.')
-
-                st.markdown(
-                    'These are usually trimmed off manually, but you can use this '
-                    'tool to do it too!')
-                st.caption('')
-                st.caption(f'[@{__author__}](https://github.com/ericksamera)\t|\tv{__version__}\t|\t{__comments__}')
+            st.title(f":apple: abi-sauce")
+            st.success('Select one of the apps above to get started!')
+    def _init_main_window(self) -> None:
+        """
+        """
+        st.title('Welcome to :apple: `abi-sauce`!')
+        st.markdown('These are a set of open-source tools to make handling electropherogram data easier.')
+        st.markdown('Check out my GitHub with the link below for some of my other projects.')
+        st.caption(f'[@{__author__}](https://github.com/ericksamera)\t|\tv{__version__}\t|\t{__comments__}')
+        return None
 # --------------------------------------------------
 if __name__=="__main__":
     streamlit_app = App()
