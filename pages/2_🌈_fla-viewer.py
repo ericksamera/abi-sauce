@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for sanger-sequence-trim.
 """
 __author__ = "Erick Samera"
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
@@ -120,9 +120,9 @@ class App:
         processed_files = {}
 
         for file in sorted(_st_uploaded_files, key=lambda x: x.name):
-            processed_name = str(file.name).strip('.fla.csv')
+            processed_name = str(file.name).replace('.fla.csv', '')
             processed_files[processed_name] = {
-                'name': processed_name.strip('.fla.csv'),
+                'name': processed_name,
                 'channels': {},
                 'peaks': {}
             }
