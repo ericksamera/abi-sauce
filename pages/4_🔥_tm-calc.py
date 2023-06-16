@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 __description__ =\
 """
-Purpose: Streamlit wrapper for sanger-sequence-trim.
+Purpose: Streamlit wrapper for tm-calc.
 """
 __author__ = "Erick Samera"
-__version__ = "1.1.0"
+__version__ = "0.5.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st

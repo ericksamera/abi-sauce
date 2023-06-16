@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 __description__ =\
 """
-Purpose: Streamlit wrapper for sanger-sequence-trim.
+Purpose: Streamlit wrapper for fla-viewer.
 """
 __author__ = "Erick Samera"
 __version__ = "1.5.3"
@@ -39,7 +39,7 @@ class App:
             unsafe_allow_html=True,
             )   
         self._init_sidebar()
-        if 'UPLOADED_FLA' not in st.session_state: self._init_file_uploader()
+        if 'UPLOADED_FLACSV' not in st.session_state: self._init_file_uploader()
         else: self._update_plot_window()
         return None
     def _init_sidebar(self) -> None:
@@ -52,7 +52,7 @@ class App:
             st.markdown('This script is intended for processing `.fsa.csv` files for fragment length analysis (FLA).')
             #st.markdown('Check out the better-maintained command-line interface on [GitHub](https://github.com/KPU-AGC/general-resources/blob/main/sanger-processing/sanger-sequence-trim.py)!')
 
-            if 'UPLOADED_FLA' in st.session_state:
+            if 'UPLOADED_FLACSV' in st.session_state:
                 st.divider()
                 with st.expander('**TRACE FILES:**', expanded=True):
 
@@ -99,8 +99,8 @@ class App:
         Function handles file upload and adds files to cache.
         """
         if not _st_uploaded_files: return None
-        st.session_state.UPLOADED_FLA = [file for file in _st_uploaded_files if 'QCReport' not in file.name]
-        st.session_state.PROCESSED_FLA = self._process_files(st.session_state.UPLOADED_FLA)
+        st.session_state.UPLOADED_FLACSV = [file for file in _st_uploaded_files if 'QCReport' not in file.name]
+        st.session_state.PROCESSED_FLA = self._process_files(st.session_state.UPLOADED_FLACSV)
     def _process_files(self, _st_uploaded_files) -> dict:
         """
         Function creates a dictionary of processed files.
