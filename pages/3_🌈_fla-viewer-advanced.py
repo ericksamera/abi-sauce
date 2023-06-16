@@ -112,7 +112,8 @@ class App:
 
         for file in sorted(_st_uploaded_files, key=lambda x: x.name):
             fsa_object = SeqIO.read(file, 'abi')
-            smap2_list = fsa_object.annotations['abif_raw']['SMap2']
+            try: smap2_list = fsa_object.annotations['abif_raw']['SMap2']
+            except: continue
 
             channels_dict = {
                 '6-FAM': fsa_object.annotations['abif_raw']['DATA9'],
