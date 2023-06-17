@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for fla-viewer-advanced.
 """
 __author__ = "Erick Samera"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
@@ -55,8 +55,13 @@ class App:
 
             if 'UPLOADED_FSA' in st.session_state:
                 st.divider()
-                with st.expander('**TRACE FILES:**', expanded=True):
 
+                if 'FAILED_FILES' in st.session_state:
+                        with st.expander('**⚠ WARNINGS:**', expanded=True):
+                            for failed_file_name in st.session_state.FAILED_FILES:
+                                st.error(f"{failed_file_name} failed to process!", icon="⚠")
+
+                with st.expander('**TRACE FILES:**', expanded=True):
                     st.session_state.SORTED_LIST = st.session_state.PROCESSED_FLA.values()
                     st.session_state.SELECTED_TRACE = st.radio(
                         'Select trace file to view:', 
@@ -113,7 +118,9 @@ class App:
         for file in sorted(_st_uploaded_files, key=lambda x: x.name):
             fsa_object = SeqIO.read(file, 'abi')
             try: smap2_list = fsa_object.annotations['abif_raw']['SMap2']
-            except: continue
+            except KeyError: 
+                if 'FAILED_FILES' not in st.session_state: st.session_state.FAILED_FILES = []
+                st.session_state.FAILED_FILES.append(file.name)
 
             channels_dict = {
                 '6-FAM': fsa_object.annotations['abif_raw']['DATA9'],
@@ -162,7 +169,7 @@ class App:
         max_y_val = max(all_y_vals) * 1.05
 
         max_heights_with_pad = {key: max([y for x, y in zip(_trace_dict['detected_peaks_x'][key], _trace_dict['detected_peaks_y'][key]) if x > 25]) * 1.05 for key in _trace_dict['channels_peaks'].keys() if [y for x, y in zip(_trace_dict['detected_peaks_x'][key], _trace_dict['detected_peaks_y'][key]) if x > 25]}
-        
+
         fig = go.Figure()
 
         for dye_color, values in _trace_dict['channels_peaks'].items():
@@ -264,6 +271,7 @@ class App:
             yaxis=dict(range=(0, _average_height)),
             modebar=dict(remove=[ "autoScale2d", "autoscale", "editInChartStudio", "editinchartstudio", "hoverCompareCartesian", "hovercompare", "lasso", "lasso2d", "orbitRotation", "orbitrotation", "pan", "pan2d", "pan3d", "reset", "resetCameraDefault3d", "resetCameraLastSave3d", "resetGeo", "resetSankeyGroup", "resetScale2d", "resetViewMapbox", "resetViews", "resetcameradefault", "resetcameralastsave", "resetsankeygroup", "resetscale", "resetview", "resetviews", "select", "select2d", "sendDataToCloud", "senddatatocloud", "tableRotation", "tablerotation", "toImage", "toggleHover", "toggleSpikelines", "togglehover", "togglespikelines", "toimage", "zoom", "zoom2d", "zoom3d", "zoomIn2d", "zoomInGeo", "zoomInMapbox", "zoomOut2d", "zoomOutGeo", "zoomOutMapbox", "zoomin", "zoomout"]),
             )
+        
         return fig
     def _plot_per_channel_traces(self, _trace_dict) -> None:
         """
@@ -279,7 +287,6 @@ class App:
                     if x_val < 25: continue
                     averages_past_threshold.append(y_val)
                     full_genotype.append({'size (bp)': x_val, 'height': y_val})
-
                 
                 if averages_past_threshold: 
                     average_height = max(averages_past_threshold)
@@ -306,7 +313,7 @@ class App:
         #st.text(f"{st.session_state.PROCESSED_FLA[f'{st.session_state.SELECTED_TRACE}']}")
         st.plotly_chart(
             self._plot_total_trace(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}"]),
-            use_container_width=True)
+           use_container_width=True)
         self._plot_per_channel_traces(st.session_state.PROCESSED_FLA[f"{st.session_state.SELECTED_TRACE}"])
         return None
     def _reset_state(self) -> None:
