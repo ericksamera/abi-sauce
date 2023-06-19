@@ -267,8 +267,8 @@ class App:
             height=100,
             legend_title_text='Channels',
             #xaxis=dict(rangeslider=dict(visible=True, thickness=0.1, range=(0,max([val for val in _trace_dict['peaks'][color]['x'] if val]))), constrain='domain'),
-            xaxis=dict(range=(0, max([val for val in _trace_dict['detected_peaks_x'][_dye_name] if val])*1.25)),
-            yaxis=dict(range=(0, _average_height)),
+            xaxis=dict(range=(0, max([val for val in _trace_dict['detected_peaks_x'][_dye_name] if val])*1.05)),
+            yaxis=dict(range=(0, int(_average_height*1.25))),
             modebar=dict(remove=[ "autoScale2d", "autoscale", "editInChartStudio", "editinchartstudio", "hoverCompareCartesian", "hovercompare", "lasso", "lasso2d", "orbitRotation", "orbitrotation", "pan", "pan2d", "pan3d", "reset", "resetCameraDefault3d", "resetCameraLastSave3d", "resetGeo", "resetSankeyGroup", "resetScale2d", "resetViewMapbox", "resetViews", "resetcameradefault", "resetcameralastsave", "resetsankeygroup", "resetscale", "resetview", "resetviews", "select", "select2d", "sendDataToCloud", "senddatatocloud", "tableRotation", "tablerotation", "toImage", "toggleHover", "toggleSpikelines", "togglehover", "togglespikelines", "toimage", "zoom", "zoom2d", "zoom3d", "zoomIn2d", "zoomInGeo", "zoomInMapbox", "zoomOut2d", "zoomOutGeo", "zoomOutMapbox", "zoomin", "zoomout"]),
             )
         
