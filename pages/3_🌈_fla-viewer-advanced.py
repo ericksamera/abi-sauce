@@ -195,6 +195,7 @@ class App:
                     x=_trace_dict['detected_peaks_x'][dye_color],
                     y=_trace_dict['detected_peaks_y'][dye_color],
                     hoverinfo='x+y+text+name' if dye_color not in ('LIZ') else 'skip',
+                    hovertemplate = "size (bp): %{x}<br>" + "height: %{y}<br>" if dye_color not in ('LIZ') else "",
                     marker=dict(
                         size=0.8,
                         color=_trace_dict['colors'][dye_color]),
@@ -254,6 +255,7 @@ class App:
             x=_trace_dict['detected_peaks_x'][_dye_name],
             y=_trace_dict['detected_peaks_y'][_dye_name],
             #hoverinfo='skip',
+            hovertemplate = "size (bp): %{x}<br>" + "height: %{y}<br>",
             marker=dict(
                 size=0.5,
                 color=_trace_dict['colors'][_dye_name]
