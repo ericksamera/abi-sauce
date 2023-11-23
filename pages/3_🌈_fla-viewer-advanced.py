@@ -4,7 +4,7 @@ __description__ =\
 Purpose: Streamlit wrapper for fla-viewer-advanced.
 """
 __author__ = "Erick Samera"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
@@ -77,9 +77,9 @@ class App:
                     'microsatellites.')
             
                 st.markdown(
-                    'In "the old days", agarose gel electrophoresis would be used '
-                    'to separate bands out for genotyping. With our fancy SeqStudio, '
-                    'capillary electrophoresis with fluorescently tagged fragments '
+                    'In "the good old days", gel electrophoresis would be used to separate'
+                    ' bands out for genotyping. With our fancy SeqStudio, capillary '
+                    'electrophoresis with fluorescently tagged fragments '
                     'gives us much better resolution--even down to the nucleotide.')
 
                 st.markdown(
