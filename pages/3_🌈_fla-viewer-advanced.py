@@ -63,7 +63,7 @@ class App:
 
                 with st.expander('**TRACE FILES:**', expanded=True):
                     st.session_state.SORTED_LIST = st.session_state.PROCESSED_FLA.values()
-                    st.session_state.SELECTED_TRACE = st.radio(
+                    st.session_state.SELECTED_TRACE = st.selectbox(
                         'Select trace file to view:', 
                         options=[trace_object['name'] for trace_object in st.session_state.SORTED_LIST])
                 st.button('Reset & Upload New', type='primary', on_click=self._reset_state, use_container_width=True)
