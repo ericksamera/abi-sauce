@@ -13,9 +13,9 @@ import streamlit_ext as ste
 import numpy as np
 from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
 from Bio import Phylo
-from decimal import Decimal, getcontext
 import io
 import re
+from itertools import combinations_with_replacement
 # --------------------------------------------------
 class App:
     def __init__(self):
@@ -47,10 +47,7 @@ class App:
             st.code(st.session_state.TREE)
             st.code(st.session_state.PHYLIP)
         return None
-    def _add_tree_text(self, newick_tree_text: str) -> None:
-        """
-        """
-        st.session_state.TREE = newick_tree_text
+    def _add_tree_text(self, newick_tree_text: str) -> None: st.session_state.TREE = newick_tree_text.replace('-', '')
     def _add_phylip_out(self, out):
         parsed_out = '\n'.join(out.split('\n')[:-1])
         st.session_state.PHYLIP = re.sub(' {1,}', '\t', parsed_out)
@@ -91,6 +88,52 @@ class App:
             return common_diff
         def myround(x, base=5):return base * round(x/base)
 
+        def _get_bruvo_distance(input_dict, marker):
+            
+            def _generate_matrix_per_allele(alleles_1: list, alleles_2: list):
+                full_allele_matrix = np.zeros(array_size, np.float64)
+                for allele in range(len(smaller_genotype)):
+                    allele_matrix = np.zeros(array_size, np.float64)
+                    sample_1_allele = alleles_1[allele]
+                    sample_2_allele = alleles_2[allele]
+                    repeat_units = int(myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker]) / marker_repeat_adj[marker])
+                    distance = float(1 - (2 ** (-repeat_units)))
+                    allele_matrix[i][ii] = distance
+                    full_allele_matrix += allele_matrix
+                return full_allele_matrix
+            
+            genome_addition = True
+            genome_loss = True
+            
+            marker_matrix = np.zeros(array_size, np.float64)
+            for i, sample_1 in enumerate(samples_list):
+                for ii, sample_2 in enumerate(samples_list):
+                    sample_1_alleles = [allele for allele in input_dict[marker][sample_1] if allele > 1]
+                    sample_2_alleles = [allele for allele in input_dict[marker][sample_2] if allele > 1]
+                    
+                    if len(sample_1_alleles) == len(sample_2_alleles): 
+                        smaller_genotype = sample_1_alleles
+                        larger_genotype = sample_2_alleles
+                        marker_matrix += _generate_matrix_per_allele(smaller_genotype, larger_genotype)
+                    else:
+                        smaller_genotype = sample_1_alleles if len(sample_1_alleles) < len(sample_2_alleles) else sample_2_alleles
+                        larger_genotype = sample_2_alleles if len(sample_1_alleles) < len(sample_2_alleles) else sample_1_alleles
+
+                        genome_adjust_matrices = []
+                        if genome_addition:
+                            genome_addition_combinations = [smaller_genotype + list(i) for i in set(sorted(combinations_with_replacement(smaller_genotype, len(larger_genotype) - len(smaller_genotype))))]
+                            for smaller_genotype_combination in genome_addition_combinations:
+                                genome_adjust_matrices.append(_generate_matrix_per_allele(smaller_genotype_combination, larger_genotype))
+                        if genome_loss:
+                            genome_loss_combinations = [smaller_genotype + list(i) for i in set(sorted(combinations_with_replacement(larger_genotype, len(larger_genotype) - len(smaller_genotype))))]
+                            for smaller_genotype_combination in genome_loss_combinations:
+                                genome_adjust_matrices.append(_generate_matrix_per_allele(smaller_genotype_combination, larger_genotype))
+                    
+                        genome_adjust_matrices_stack = np.stack(genome_adjust_matrices)
+                        marker_matrix += np.mean(genome_adjust_matrices_stack, axis=0)
+
+            return marker_matrix
+
         parsed_data: dict = {}
         marker_allele_calc = {}
         for sample_dict in input_list:
@@ -105,31 +148,19 @@ class App:
                 alleles = sorted([float(sample_dict[key]) if float(sample_dict.get(key, 0)) > 0 else 1.0 for key in marker_keys], reverse=True)
                 marker_allele_calc[marker].append(find_common_difference([allele for allele in alleles if allele > 1.0]))
                 parsed_data[marker].update({sample_name: alleles})
+        
+        # marker repeat calculator
         marker_repeat_adj = {}
         for marker_a in marker_allele_calc: marker_repeat_adj[marker_a] = sorted([m for m in marker_allele_calc[marker_a] if isinstance(m, float)])[0]
 
         samples_list = sorted(samples_list)
-        print(parsed_data)
-        print()
+
         if samples_list:
-            values = []
             array_size = (len(samples_list), len(samples_list))
             starting_matrix = np.zeros(array_size, np.float64)
             for marker in sorted(parsed_data.keys()):
-                marker_matrix = np.zeros(array_size, np.float64)
-                for allele in range(5):
-                    allele_matrix = np.zeros(array_size, np.float64)
-                    for i, sample_1 in enumerate(samples_list):
-                        for ii, sample_2 in enumerate(samples_list):
-                                sample_1_allele = parsed_data[marker][sample_1][allele] 
-                                sample_2_allele = parsed_data[marker][sample_2][allele]
-                                repeat_units = int(myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker_a]) / marker_repeat_adj[marker_a])
-                                distance = round((float(1 - (2 ** (-repeat_units)))/100), 5)
-                                values.append(distance)
-                                allele_matrix[i][ii] = distance
+                starting_matrix += _get_bruvo_distance(parsed_data, marker)
 
-                    marker_matrix += allele_matrix
-                starting_matrix += marker_matrix
             distance_matrix = [row[:i+1] for i, row in enumerate(np.tril(starting_matrix).tolist())]
 
             x = DistanceMatrix([sample.replace(' ', '_') for sample in samples_list], distance_matrix)
