@@ -46,9 +46,10 @@ class App:
         if 'TREE' in st.session_state:
             st.caption("Copy this into the 'Tree text' box in  <a href=https://itol.embl.de/upload.cgi>Interactive Tree of Life (ITOL)</a>", unsafe_allow_html=True)
             st.code(st.session_state.TREE)
-            st.link_button("Click here to open tree in ITOL.", f"https://itol.embl.de/upload.cgi?ttext={st.session_state.TREE}", help=None, type="secondary", disabled=False, use_container_width=False)
-            st.caption("This is for Erick to debug.")
-            st.code(st.session_state.PHYLIP)
+            st.link_button("Open tree in ITOL", f"https://itol.embl.de/upload.cgi?ttext={st.session_state.TREE}", help=None, type="secondary", disabled=False, use_container_width=False)
+            with st.expander("PHYLIP distance matrix output"):
+                st.caption("This is for Erick to debug.")
+                st.code(st.session_state.PHYLIP)
         return None
     def _add_tree_text(self, newick_tree_text: str) -> None: st.session_state.TREE = newick_tree_text.replace('-', '')
     def _add_phylip_out(self, out):
