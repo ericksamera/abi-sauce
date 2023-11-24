@@ -193,7 +193,11 @@ class App:
     
         with st.sidebar:
             st.title(f"{self.emoji} abi-sauce | {self.title}")
-            st.markdown('This script should be used to process the table of Hydrangea alleles for the lab.')
+            st.markdown('This tool should be used to process the table of Hydrangea alleles for the lab.')
+            st.divider()
+            st.markdown('Genetic distance is calculated using Bruvo\'s genetic distance ([Bruvo et al., 2004](https://pubmed.ncbi.nlm.nih.gov/15189230/)) '
+                        'and uses repeat number differences to calculate genetic relatedness.')
+            st.markdown("Annoying to implement, but special considerations are made for polyploid individuals of different allele numbers.")
 
     def _reset_state(self) -> None:
         """
