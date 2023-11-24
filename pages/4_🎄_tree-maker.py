@@ -21,7 +21,7 @@ class App:
     def __init__(self):
         """
         """
-        self.title = "TREE-maker"
+        self.title = "tree-maker"
         self.emoji = '🎄'
         st.set_page_config(
             page_title=f"abi-sauce | {self.title}",
@@ -44,7 +44,9 @@ class App:
         self._init_sidebar()
         self._init_file()
         if 'TREE' in st.session_state:
+            st.caption("Copy this into the 'Tree text' box in  <a href=https://itol.embl.de/upload.cgi>Interactive Tree of Life (ITOL)</a>", unsafe_allow_html=True)
             st.code(st.session_state.TREE)
+            st.caption("This is for Erick to debug.")
             st.code(st.session_state.PHYLIP)
         return None
     def _add_tree_text(self, newick_tree_text: str) -> None: st.session_state.TREE = newick_tree_text.replace('-', '')
@@ -92,7 +94,7 @@ class App:
             
             def _generate_matrix_per_allele(alleles_1: list, alleles_2: list):
                 full_allele_matrix = np.zeros(array_size, np.float64)
-                for allele in range(len(smaller_genotype)):
+                for allele in range(len(alleles_1)):
                     allele_matrix = np.zeros(array_size, np.float64)
                     sample_1_allele = alleles_1[allele]
                     sample_2_allele = alleles_2[allele]
@@ -128,6 +130,9 @@ class App:
                             genome_loss_combinations = [smaller_genotype + list(i) for i in set(sorted(combinations_with_replacement(larger_genotype, len(larger_genotype) - len(smaller_genotype))))]
                             for smaller_genotype_combination in genome_loss_combinations:
                                 genome_adjust_matrices.append(_generate_matrix_per_allele(smaller_genotype_combination, larger_genotype))
+                        if (not genome_addition) and (not genome_loss):
+                            smaller_genotype = smaller_genotype + [1 * (len(larger_genotype) - len(smaller_genotype))]
+                            genome_adjust_matrices.append(_generate_matrix_per_allele(smaller_genotype, larger_genotype))
                     
                         genome_adjust_matrices_stack = np.stack(genome_adjust_matrices)
                         marker_matrix += np.mean(genome_adjust_matrices_stack, axis=0)
@@ -177,7 +182,7 @@ class App:
     
         with st.form("upload form", clear_on_submit=True):
             raw_input_text = st.text_area('Raw Input Table')
-            submit_button = st.form_submit_button("Upload and process", on_click=self._parse_input_table, args=(raw_input_text,))
+            submit_button = st.form_submit_button("Upload and process", on_click=self._parse_input_table, args=(raw_input_text,), help="If you entered your data and clicked submit but it didn't output anything, click it again.")
 
     def _init_sidebar(self) -> None:
         """
@@ -186,7 +191,7 @@ class App:
     
         with st.sidebar:
             st.title(f"{self.emoji} abi-sauce | {self.title}")
-            st.markdown('This script is intended for processing `.fsa` files for fragment length analysis (FLA).')
+            st.markdown('This script should be used to process the table of Hydrangea alleles for the lab.')
 
     def _reset_state(self) -> None:
         """
