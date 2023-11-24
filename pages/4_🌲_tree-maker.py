@@ -13,6 +13,7 @@ import streamlit_ext as ste
 import numpy as np
 from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
 from Bio import Phylo
+from decimal import Decimal, getcontext
 import io
 import re
 # --------------------------------------------------
@@ -53,7 +54,22 @@ class App:
     def _add_phylip_out(self, out):
         parsed_out = '\n'.join(out.split('\n')[:-1])
         st.session_state.PHYLIP = re.sub(' {1,}', '\t', parsed_out)
-    def _update_genetic_distance(self, input_data) -> None:
+    def _parse_input_table(self, input_data) -> None:
+        keys = ['Name', '339-1', '339-2', '339-3', '339-4', '339-5', '407-1', '407-2', '407-3', '407-4', '407-5', '121-1', '121-2', '121-3', '121-4', '121-5','73-1', '73-2', '73-3', '73-4', '73-5','285-1', '285-2', '285-3', '285-4', '285-5', '223-1', '223-2', '223-3', '223-4', '223-5', '441-1', '441-2', '441-3', '441-4', '441-5', '157-1', '157-2', '157-3', '157-4', '157-5', '95-1', '95-2', '95-3', '95-4', '95-5', '311-1', '311-2', '311-3', '311-4', '311-5']
+        if not input_data: return None
+        input_list = []
+        samples_list = []
+        for sample_line in input_data.split('\n')[1:]:
+            dict_to_add = {key: value for key, value in zip(keys, sample_line.split('\t'))}
+            dict_to_add_processed = {key: value if key == "Name" else float(value) for key, value in dict_to_add.items()}
+            input_list.append(dict_to_add_processed)
+            if dict_to_add['Name'] != '': samples_list.append(dict_to_add['Name'])
+        
+        if samples_list:
+            self._update_genetic_distance(input_list, samples_list)
+
+
+    def _update_genetic_distance(self, input_list, samples_list) -> None:
         """
         """
         
@@ -75,17 +91,6 @@ class App:
             return common_diff
         def myround(x, base=5):return base * round(x/base)
 
-
-        keys = ['Name', '339-1', '339-2', '339-3', '339-4', '339-5', '407-1', '407-2', '407-3', '407-4', '407-5', '121-1', '121-2', '121-3', '121-4', '121-5','73-1', '73-2', '73-3', '73-4', '73-5','285-1', '285-2', '285-3', '285-4', '285-5', '223-1', '223-2', '223-3', '223-4', '223-5', '441-1', '441-2', '441-3', '441-4', '441-5', '157-1', '157-2', '157-3', '157-4', '157-5', '95-1', '95-2', '95-3', '95-4', '95-5', '311-1', '311-2', '311-3', '311-4', '311-5']
-        if not input_data: return None
-        input_list = []
-        samples_list = []
-        for sample_line in input_data.split('\n')[1:]:
-            dict_to_add = {key: value for key, value in zip(keys, sample_line.split('\t'))}
-            input_list.append(dict_to_add)
-            if dict_to_add['Name'] != '': samples_list.append(dict_to_add['Name'])
-
-
         parsed_data: dict = {}
         marker_allele_calc = {}
         for sample_dict in input_list:
@@ -101,27 +106,30 @@ class App:
                 marker_allele_calc[marker].append(find_common_difference([allele for allele in alleles if allele > 1.0]))
                 parsed_data[marker].update({sample_name: alleles})
         marker_repeat_adj = {}
-        for marker_a in marker_allele_calc: 
-            marker_repeat_adj[marker_a] = sorted([m for m in marker_allele_calc[marker_a] if isinstance(m, float)])[0]
+        for marker_a in marker_allele_calc: marker_repeat_adj[marker_a] = sorted([m for m in marker_allele_calc[marker_a] if isinstance(m, float)])[0]
 
+        samples_list = sorted(samples_list)
+        print(parsed_data)
+        print()
         if samples_list:
+            values = []
             array_size = (len(samples_list), len(samples_list))
-            starting_matrix = np.empty(array_size)
-            for marker in parsed_data:
-                marker_matrix = np.empty(array_size)
+            starting_matrix = np.zeros(array_size, np.float64)
+            for marker in sorted(parsed_data.keys()):
+                marker_matrix = np.zeros(array_size, np.float64)
                 for allele in range(5):
-                    allele_matrix = np.empty(array_size)
+                    allele_matrix = np.zeros(array_size, np.float64)
                     for i, sample_1 in enumerate(samples_list):
                         for ii, sample_2 in enumerate(samples_list):
                                 sample_1_allele = parsed_data[marker][sample_1][allele] 
                                 sample_2_allele = parsed_data[marker][sample_2][allele]
-                                repeat_units = myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker_a]) / marker_repeat_adj[marker_a]
-                                distance = 1 - (2 ** -abs(repeat_units))
+                                repeat_units = int(myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker_a]) / marker_repeat_adj[marker_a])
+                                distance = round((float(1 - (2 ** (-repeat_units)))/100), 5)
+                                values.append(distance)
                                 allele_matrix[i][ii] = distance
 
                     marker_matrix += allele_matrix
                 starting_matrix += marker_matrix
-            
             distance_matrix = [row[:i+1] for i, row in enumerate(np.tril(starting_matrix).tolist())]
 
             x = DistanceMatrix([sample.replace(' ', '_') for sample in samples_list], distance_matrix)
@@ -136,9 +144,9 @@ class App:
         """
         """
     
-        with st.form("upload form", clear_on_submit=False):
+        with st.form("upload form", clear_on_submit=True):
             raw_input_text = st.text_area('Raw Input Table')
-            submit_button = st.form_submit_button("Upload and process", on_click=self._update_genetic_distance, args=(raw_input_text,))
+            submit_button = st.form_submit_button("Upload and process", on_click=self._parse_input_table, args=(raw_input_text,))
 
     def _init_sidebar(self) -> None:
         """
