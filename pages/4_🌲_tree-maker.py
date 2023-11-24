@@ -91,6 +91,25 @@ class App:
             return common_diff
         def myround(x, base=5):return base * round(x/base)
 
+        def _get_bruvo_distance(input_dict, marker, sample_1, sample_2, i, ii, marker_matrix):
+            
+            sample_1_alleles = [allele for allele in input_dict[marker][sample_1] if allele > 1]
+            sample_2_alleles = [allele for allele in input_dict[marker][sample_2] if allele > 1]
+            
+            if len(sample_1_alleles) == len(sample_2_alleles):
+                for allele in range(len(sample_1_alleles)):
+                    allele_matrix = np.zeros(array_size, np.float64)
+                    sample_1_allele = input_dict[marker][sample_1][allele] 
+                    sample_2_allele = input_dict[marker][sample_2][allele]
+                    repeat_units = int(myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker_a]) / marker_repeat_adj[marker_a])
+                    distance = round((float(1 - (2 ** (-repeat_units)))/100), 5)
+                    values.append(distance)
+                    allele_matrix[i][ii] = distance
+                marker_matrix += allele_matrix
+            elif len(sample_1_alleles) < len(sample_2_alleles):
+                print(sample_1_alleles, sample_2_alleles)
+            return marker_matrix
+
         parsed_data: dict = {}
         marker_allele_calc = {}
         for sample_dict in input_list:
@@ -116,19 +135,10 @@ class App:
             array_size = (len(samples_list), len(samples_list))
             starting_matrix = np.zeros(array_size, np.float64)
             for marker in sorted(parsed_data.keys()):
-                marker_matrix = np.zeros(array_size, np.float64)
-                for allele in range(5):
-                    allele_matrix = np.zeros(array_size, np.float64)
-                    for i, sample_1 in enumerate(samples_list):
-                        for ii, sample_2 in enumerate(samples_list):
-                                sample_1_allele = parsed_data[marker][sample_1][allele] 
-                                sample_2_allele = parsed_data[marker][sample_2][allele]
-                                repeat_units = int(myround(abs((sample_1_allele - sample_2_allele)), marker_repeat_adj[marker_a]) / marker_repeat_adj[marker_a])
-                                distance = round((float(1 - (2 ** (-repeat_units)))/100), 5)
-                                values.append(distance)
-                                allele_matrix[i][ii] = distance
-
-                    marker_matrix += allele_matrix
+                marker_matrix = np.zeros(array_size, np.float64) 
+                for i, sample_1 in enumerate(samples_list):
+                    for ii, sample_2 in enumerate(samples_list):
+                        marker_matrix += _get_bruvo_distance(parsed_data, marker, sample_1, sample_2, i, ii, marker_matrix)
                 starting_matrix += marker_matrix
             distance_matrix = [row[:i+1] for i, row in enumerate(np.tril(starting_matrix).tolist())]
 
