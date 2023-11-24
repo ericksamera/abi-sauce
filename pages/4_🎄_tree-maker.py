@@ -46,6 +46,7 @@ class App:
         if 'TREE' in st.session_state:
             st.caption("Copy this into the 'Tree text' box in  <a href=https://itol.embl.de/upload.cgi>Interactive Tree of Life (ITOL)</a>", unsafe_allow_html=True)
             st.code(st.session_state.TREE)
+            st.link_button("Click here to open tree in ITOL.", f"https://itol.embl.de/upload.cgi?ttext={st.session_state.TREE}", help=None, type="secondary", disabled=False, use_container_width=False)
             st.caption("This is for Erick to debug.")
             st.code(st.session_state.PHYLIP)
         return None
