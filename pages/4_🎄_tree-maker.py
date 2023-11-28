@@ -4,8 +4,9 @@ __description__ =\
 Purpose: Streamlit wrapper for fla-viewer-advanced.
 """
 __author__ = "Erick Samera"
-__version__ = "1.1.0"
-__comments__ = "stable enough"
+__version__ = "1.2.0"
+__date__ = "20231127"
+__comments__ = "accounted for blank samples"
 # --------------------------------------------------
 import streamlit as st
 import streamlit_ext as ste
@@ -206,6 +207,7 @@ class App:
             st.markdown('Genetic distance is calculated using Bruvo\'s genetic distance ([Bruvo et al., 2004](https://pubmed.ncbi.nlm.nih.gov/15189230/)) '
                         'and uses repeat number differences to calculate genetic relatedness.')
             st.markdown("Annoying to implement, but special considerations are made for polyploid individuals of different allele numbers.")
+            st.caption(f"@{__author__} | {__version__} ({__date__}): {__comments__}")
 
     def _reset_state(self) -> None:
         """
