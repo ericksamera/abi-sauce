@@ -4,8 +4,8 @@ __description__ =\
 Purpose: Streamlit wrapper for fla-viewer-advanced.
 """
 __author__ = "Erick Samera"
-__version__ = "1.2.0"
-__comments__ = "stable enough"
+__version__ = "1.2.1"
+__comments__ = "stable enough; altered zoom"
 # --------------------------------------------------
 import streamlit as st
 import streamlit_ext as ste

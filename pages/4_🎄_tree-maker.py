@@ -56,13 +56,17 @@ class App:
         parsed_out = '\n'.join(out.split('\n')[:-1])
         st.session_state.PHYLIP = re.sub(' {1,}', '\t', parsed_out)
     def _parse_input_table(self, input_data) -> None:
+        def _parse_table_vals(input_value: str) -> float:
+            try: return float(input_value)
+            except ValueError: return float(0.0)
+
         keys = ['Name', '339-1', '339-2', '339-3', '339-4', '339-5', '407-1', '407-2', '407-3', '407-4', '407-5', '121-1', '121-2', '121-3', '121-4', '121-5','73-1', '73-2', '73-3', '73-4', '73-5','285-1', '285-2', '285-3', '285-4', '285-5', '223-1', '223-2', '223-3', '223-4', '223-5', '441-1', '441-2', '441-3', '441-4', '441-5', '157-1', '157-2', '157-3', '157-4', '157-5', '95-1', '95-2', '95-3', '95-4', '95-5', '311-1', '311-2', '311-3', '311-4', '311-5']
         if not input_data: return None
         input_list = []
         samples_list = []
         for sample_line in input_data.split('\n')[1:]:
             dict_to_add = {key: value for key, value in zip(keys, sample_line.split('\t'))}
-            dict_to_add_processed = {key: value if key == "Name" else float(value) for key, value in dict_to_add.items()}
+            dict_to_add_processed = {key: value if key == "Name" else _parse_table_vals(value) for key, value in dict_to_add.items()}
             input_list.append(dict_to_add_processed)
             if dict_to_add['Name'] != '': samples_list.append(dict_to_add['Name'])
         
@@ -153,12 +157,16 @@ class App:
                 sample_name = sample_dict['Name']
                 marker_keys = [key for key in sample_dict.keys() if key.startswith(marker)]
                 alleles = sorted([float(sample_dict[key]) if float(sample_dict.get(key, 0)) > 0 else 1.0 for key in marker_keys], reverse=True)
-                marker_allele_calc[marker].append(find_common_difference([allele for allele in alleles if allele > 1.0]))
+                calculated_repeat_len = find_common_difference([allele for allele in alleles if allele > 1.0])
+                marker_allele_calc[marker].append(calculated_repeat_len)
                 parsed_data[marker].update({sample_name: alleles})
         
         # marker repeat calculator
         marker_repeat_adj = {}
-        for marker_a in marker_allele_calc: marker_repeat_adj[marker_a] = sorted([m for m in marker_allele_calc[marker_a] if isinstance(m, float)])[0]
+        for marker_a in marker_allele_calc:
+            try: marker_repeat_len = sorted([m for m in marker_allele_calc[marker_a] if isinstance(m, float)])[0]
+            except IndexError: marker_repeat_len = 1
+            marker_repeat_adj[marker_a] = marker_repeat_len
 
         samples_list = sorted(samples_list)
 
