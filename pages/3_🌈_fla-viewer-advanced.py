@@ -208,9 +208,11 @@ class App:
 
         fig.update_layout(
             legend_title_text='Channels',
+            dragmode="zoom",
             xaxis=dict(
                 range=(0, max_x_val+20),
-                rangeslider=dict(visible=True, thickness=0.1, range=(0, max_x_val+20))),
+                #rangeslider=dict(visible=True, thickness=0.1, range=(0, max_x_val+20))
+                ),
             yaxis=dict(range=(0, max_y_val))
             )
 
