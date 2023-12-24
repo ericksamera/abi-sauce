@@ -102,10 +102,15 @@ class App:
                         return flags_and_name                
                     
                     st.session_state.SORTED_LIST = sorted(st.session_state.PROCESSED_FILES.values(), reverse=st.session_state.REVERSE_SORT, key=lambda x: x[_translate_labels[st.session_state.TRACE_LIST_SORT]])
-                    st.session_state.SELECTED_TRACE = st.radio(
-                        'Select trace file to view:', 
+                    
+                    st.session_state.SELECTED_TRACE = st.selectbox(
+                        'Select trace file to view:',
                         options=[seq_object['name'] for seq_object in st.session_state.SORTED_LIST],
                         format_func=lambda x: show_flags_with_name(x, st.session_state.FLAGS))
+                    #st.session_state.SELECTED_TRACE = st.radio(
+                    #    'Select trace file to view:',
+                    #    options=[seq_object['name'] for seq_object in st.session_state.SORTED_LIST],
+                    #    format_func=lambda x: show_flags_with_name(x, st.session_state.FLAGS))
                 with st.expander('**DOWNLOAD OPTIONS:**'):
                     st.session_state.DEFAULT_FILENAME = 'abi-sauce-trim'
                     st.session_state.USER_FILENAME = st.text_input('File name', placeholder='abi-sauce-trim')
