@@ -81,8 +81,8 @@ class App:
 
         samples_per_unit = st.number_input("Samples per flow cell", value=1, disabled=True if unknown_option=="samples per flow cell" else False)
         depth = st.number_input("Sequencing Depth (X)", value=20, disabled=True if unknown_option=="depth" else False)
-        duplication = st.number_input("Percent Read Duplication (%)", value=1, min_value=0, max_value=100)
-        on_target = st.number_input("Percent Region/Genome Coverage (%)", value=100, min_value=0, max_value=100)
+        duplication = st.number_input("Percent Read Duplication (%)", value=3, min_value=0, max_value=100)
+        on_target = st.number_input("Percent Region/Genome Coverage (%)", value=85, min_value=0, max_value=100)
 
         output_per_unit = st.selectbox(
             "Sequencing Output (bp)",
