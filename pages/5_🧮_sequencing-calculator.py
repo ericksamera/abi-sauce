@@ -67,22 +67,31 @@ class App:
             "MinION: 15000000000": 15000000000
         }
 
-
-        unknown_option = st.radio("Unknown value", ["samples per flow cell", "depth", "genome size"])
+        variable_of_interest_list = [
+            "samples per flow cell", 
+            "depth", 
+            "genome size"
+        ]
+        variable_of_interest = st.radio("Variable of interest:", variable_of_interest_list)
 
         region_size_col1, region_size_col2 = st.columns(2)
         with region_size_col1:
-            region_size = st.text_input("Region/Genome size (bp)", value="3.3 GB", key="region_size_samples", disabled=True if unknown_option=="genome size" else False)
+            region_size = st.text_input("Region/Genome size (bp)", value="3.3 GB", key="region_size_samples", disabled=True if variable_of_interest=="genome size" else False)
             if not region_size: region_size = "1 bp"
             region_size_int = self._parse_region_size(region_size)
         with region_size_col2:
             st.caption(f"Interpreted as:")
             st.caption(f"{region_size_int} bp / {region_size_int  / 1_000} Kbp / {region_size_int  / 1_000_000} Mbp / {region_size_int / 1_000_000_000} Gbp")
 
-        samples_per_unit = st.number_input("Samples per flow cell", value=1, disabled=True if unknown_option=="samples per flow cell" else False)
-        depth = st.number_input("Sequencing Depth (X)", value=20, disabled=True if unknown_option=="depth" else False)
-        duplication = st.number_input("Percent Read Duplication (%)", value=3, min_value=0, max_value=100)
-        on_target = st.number_input("Percent Region/Genome Coverage (%)", value=85, min_value=0, max_value=100)
+        samples_per_unit = st.number_input("Samples per flow cell", value=1, disabled=True if variable_of_interest=="samples per flow cell" else False)
+        depth = st.number_input("Sequencing Depth (X)", value=20, disabled=True if variable_of_interest=="depth" else False)
+        dup_col1, dup_col2 = st.columns(2)
+        with dup_col1:
+            duplication = st.number_input("Percent Read Duplication (%)", value=3, min_value=0, max_value=100)
+        with dup_col2:
+            st.caption("Duplications occur when multiple copies of the same original molecule are sequenced. The frequency of duplication is protocol dependent.")
+            st.caption("The default (2%) is reasonable, according to experimental data.")
+        on_target = st.number_input("Percent Reads On-target (%)", value=85, min_value=0, max_value=100)
 
         output_per_unit = st.selectbox(
             "Sequencing Output (bp)",
@@ -95,10 +104,10 @@ class App:
             index=0,
             placeholder="Select sequencing chemistry",)
         
-        if unknown_option != "depth":
+        if variable_of_interest != "depth":
             total_output_required = region_size_int * depth / ((1-(duplication/100)) * on_target/100)
 
-        match unknown_option:
+        match variable_of_interest:
             case "samples per flow cell":
                 output = output_per_unit_dict[output_per_unit] / total_output_required
                 output_unit = "samples per flow cell."
@@ -119,7 +128,7 @@ class App:
                 output = 0
                 output_unit = ""
 
-        st.header(f"{output} {output_unit}")
+        st.header(f"{output:.1f} {output_unit}")
 
     def _init_sidebar(self) -> None:
         """
