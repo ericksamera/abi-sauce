@@ -77,7 +77,7 @@ class App:
             region_size_int = self._parse_region_size(region_size)
         with region_size_col2:
             st.caption(f"Interpreted as:")
-            st.caption(f"{region_size_int} bp / {region_size_int  / 1_000_000} Kbp / {region_size_int  / 1_000_000} Mbp / {region_size_int / 1_000_000_000} Gbp")
+            st.caption(f"{region_size_int} bp / {region_size_int  / 1_000} Kbp / {region_size_int  / 1_000_000} Mbp / {region_size_int / 1_000_000_000} Gbp")
 
         samples_per_unit = st.number_input("Samples per flow cell", value=1, disabled=True if unknown_option=="samples per flow cell" else False)
         depth = st.number_input("Sequencing Depth (X)", value=20, disabled=True if unknown_option=="depth" else False)
