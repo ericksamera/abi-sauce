@@ -107,14 +107,13 @@ class App:
         if variable_of_interest != "depth":
             total_output_required = region_size_int * depth / ((1-(duplication/100)) * on_target/100)
 
-        match variable_of_interest:
-            case "samples per flow cell":
+        if variable_of_interest == "samples per flow cell":
                 output = output_per_unit_dict[output_per_unit] / total_output_required
                 output_unit = "samples per flow cell."
-            case "depth":
+        elif variable_of_interest == "samples per flow cell":
                 output = ((output_per_unit_dict[output_per_unit]/samples_per_unit) * ((1-(duplication/100)) * on_target/100) / region_size_int)
                 output_unit = f"X sequencing depth across {samples_per_unit} samples."
-            case "genome size":
+        elif variable_of_interest == "samples per flow cell":
                 reverse_conversion = st.radio("Unit", ["bp", "Kbp", "Mbp", "Gbp"])
                 reverse_conversion_dict = {
                     'bp': 1,
@@ -124,7 +123,7 @@ class App:
                 }
                 output = ((output_per_unit_dict[output_per_unit]/samples_per_unit) * ((1-(duplication/100)) * (on_target/100) / depth)) / reverse_conversion_dict[reverse_conversion]
                 output_unit = f"{reverse_conversion} region/genome assuming {depth} depth across {samples_per_unit} samples."
-            case _:
+        else:
                 output = 0
                 output_unit = ""
 
