@@ -107,13 +107,13 @@ class App:
         if variable_of_interest != "depth":
             total_output_required = region_size_int * depth / ((1-(duplication/100)) * on_target/100)
 
-        if variable_of_interest == "samples per flow cell":
+        if variable_of_interest == variable_of_interest_list[0]: 
                 output = output_per_unit_dict[output_per_unit] / total_output_required
                 output_unit = "samples per flow cell."
-        elif variable_of_interest == "samples per flow cell":
+        elif variable_of_interest == variable_of_interest_list[1]:
                 output = ((output_per_unit_dict[output_per_unit]/samples_per_unit) * ((1-(duplication/100)) * on_target/100) / region_size_int)
                 output_unit = f"X sequencing depth across {samples_per_unit} samples."
-        elif variable_of_interest == "samples per flow cell":
+        elif variable_of_interest == variable_of_interest_list[2]:
                 reverse_conversion = st.radio("Unit", ["bp", "Kbp", "Mbp", "Gbp"])
                 reverse_conversion_dict = {
                     'bp': 1,
