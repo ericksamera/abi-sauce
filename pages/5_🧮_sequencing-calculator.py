@@ -107,7 +107,7 @@ class App:
         
         unit_output = output_per_unit_dict[output_per_unit]
         with seq_out_col2:
-            if output_per_unit == "MinION, FLO-MIN114":
+            if output_per_unit in ("MinION, FLO-MIN114",):
                 
                 exp_runtime = st.slider(
                     "Runtime (hrs)",
@@ -131,6 +131,17 @@ class App:
 
                 unit_output = model_option_to_eq[model_option](exp_runtime * 60)
                 st.caption(f"Sequencing output: {unit_output / 1_000_000_000:.1f} Gbp with a runtime of {exp_runtime} hrs.")
+            elif output_per_unit in ("MiSeq v3 (2x300)", "MiSeq v2 (2x250)"):
+                model_option = st.selectbox(
+                    "Model",
+                    ("Average", "Best so far", "Theoretical"),
+                    help="Base output is calculated by a third-order polynomial model from experimental data.",)
+                model_option_to_eq = {
+                    'Average': 12.14e9,
+                    'Best so far': 22.1e9,
+                    'Theoretical': 15000000000,
+                }
+                unit_output = model_option_to_eq[model_option]
 
         if variable_of_interest != "depth":
             total_output_required = region_size_int * depth / ((1-(duplication/100)) * on_target/100)
