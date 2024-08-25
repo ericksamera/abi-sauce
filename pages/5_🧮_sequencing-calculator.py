@@ -131,7 +131,7 @@ class App:
 
                 unit_output = model_option_to_eq[model_option](exp_runtime * 60)
                 st.caption(f"Sequencing output: {unit_output / 1_000_000_000:.1f} Gbp with a runtime of {exp_runtime} hrs.")
-            elif output_per_unit in ("MiSeq v3 (2x300)", "MiSeq v2 (2x250)"):
+            elif output_per_unit in ("MiSeq v3 (2x300)"):
                 model_option = st.selectbox(
                     "Model",
                     ("Average", "Best so far", "Theoretical"),
@@ -140,6 +140,17 @@ class App:
                     'Average': 12.14e9,
                     'Best so far': 22.1e9,
                     'Theoretical': 15000000000,
+                }
+                unit_output = model_option_to_eq[model_option]
+            elif output_per_unit in ("MiSeq v2 (2x250)"):
+                model_option = st.selectbox(
+                    "Model",
+                    ("Average", "Best so far", "Theoretical"),
+                    help="Base output is calculated by a third-order polynomial model from experimental data.",)
+                model_option_to_eq = {
+                    'Average': 12.14e9,
+                    'Best so far': 22.1e9,
+                    'Theoretical': 7500000000,
                 }
                 unit_output = model_option_to_eq[model_option]
 
