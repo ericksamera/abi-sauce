@@ -8,7 +8,6 @@ __version__ = "1.5.0"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
-import streamlit_ext as ste
 # --------------------------------------------------
 import plotly.graph_objects as go
 from Bio import SeqIO
@@ -115,14 +114,18 @@ class App:
                     st.session_state.DEFAULT_FILENAME = 'abi-sauce-trim'
                     st.session_state.USER_FILENAME = st.text_input('File name', placeholder='abi-sauce-trim')
                     st.session_state.FILENAME =  st.session_state.USER_FILENAME if st.session_state.USER_FILENAME else st.session_state.DEFAULT_FILENAME
-                    st.session_state.CONCATENATE: bool = st.checkbox("Concatenate entries into single fasta.", value=True)
+                    st.session_state.CONCATENATE = st.checkbox("Concatenate entries into single fasta.", value=True)
                     if not st.session_state.CONCATENATE: st.caption('Individual FASTAs will be compiled into a single ZIP file.')
                     file_type, file_buffer = self._prepare_download()
-                    download_button = ste.download_button(
-                        label="Download Sequences",
-                        data=file_buffer,
-                        file_name=f"{st.session_state.FILENAME}.{file_type}",
-                    )
+
+                    @st.fragment
+                    def _download_fragment():
+                        st.download_button(
+                            label="Download Sequences",
+                            data=file_buffer,
+                            file_name=f"{st.session_state.FILENAME}.{file_type}",
+                        )
+                    _download_fragment()
             st.divider()
 
             with st.expander('MORE INFO'):
@@ -141,6 +144,7 @@ class App:
                     'tool to do it too!')
                 st.caption('')
                 st.caption(f'[@{__author__}](https://github.com/ericksamera)\t|\tv{__version__}\t|\t{__comments__}')
+
     def _init_file_uploader(self) -> None:
         """
         """

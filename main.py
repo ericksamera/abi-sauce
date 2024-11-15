@@ -8,7 +8,6 @@ __version__ = "1.1.1"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
-import streamlit_ext as ste
 # --------------------------------------------------
 class App:
     def __init__(self):

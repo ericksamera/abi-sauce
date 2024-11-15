@@ -9,7 +9,6 @@ __date__ = "20231127"
 __comments__ = "accounted for blank samples"
 # --------------------------------------------------
 import streamlit as st
-import streamlit_ext as ste
 # --------------------------------------------------
 import numpy as np
 from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor

@@ -8,7 +8,6 @@ __version__ = "1.2.1"
 __comments__ = "stable enough; altered zoom"
 # --------------------------------------------------
 import streamlit as st
-import streamlit_ext as ste
 # --------------------------------------------------
 from scipy.signal import find_peaks
 import plotly.graph_objects as go

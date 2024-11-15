@@ -8,7 +8,6 @@ __version__ = "1.5.3"
 __comments__ = "stable enough"
 # --------------------------------------------------
 import streamlit as st
-import streamlit_ext as ste
 # --------------------------------------------------
 import plotly.graph_objects as go
 import io
