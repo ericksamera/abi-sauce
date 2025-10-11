@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abi-sauce"
+version = "0.1.0"
+description = "Intro bioinformatics tools"
+requires-python = ">=3.11"
+dependencies = ["biopython", "streamlit", "plotly"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]

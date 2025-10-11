@@ -129,3 +129,6 @@ dmypy.json
 .pyre/
 *.fsa
 *.csv
+
+
+*codebase*
