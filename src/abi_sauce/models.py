@@ -1,8 +1,9 @@
+# src/abi_sauce/models.py
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 class AssetKind(str, Enum):
     SEQUENCE = "sequence"      # e.g., FASTA/GenBank/ApE
@@ -16,7 +17,7 @@ class AssetBase:
     ext: str
     size: int
     checksum_md5: str
-    created_at: datetime = field(default_factory=datetime.utcnow, init=False)  # <-- change
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)
     kind: AssetKind = field(init=False)
 
 
@@ -57,3 +58,49 @@ class TraceAsset(AssetBase):
         hdr = header or self.name
         wrapped = "\n".join(self.sequence[i:i+70] for i in range(0, len(self.sequence), 70))
         return f">{hdr}\n{wrapped}\n"
+
+@dataclass
+class Sample:
+    id: str
+    name: str
+    asset_ids: List[str] = field(default_factory=list)
+    description: str = ""
+    tags: List[str] = field(default_factory=list)
+    primary_asset_id: Optional[str] = None
+
+    # user edits (do not mutate original assets)
+    sequence_override: Optional[str] = None
+    feature_overrides: Optional[List[Dict[str, Any]]] = None
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)
+
+    # helpers (these do not persist assets; managers should pass in assets as a dict)
+    def effective_sequence(self, assets: Dict[str, AssetBase]) -> Optional[str]:
+        if self.sequence_override:
+            return self.sequence_override
+        # choose primary, else first sequence-like thing with bases
+        cand_id = self.primary_asset_id or next((aid for aid in self.asset_ids if aid in assets), None)
+        if not cand_id:
+            return None
+        a = assets.get(cand_id)
+        if isinstance(a, SequenceAsset):
+            return a.sequence
+        if isinstance(a, TraceAsset):
+            return a.sequence
+        return None
+
+    def effective_features(self, assets: Dict[str, AssetBase]) -> List[Dict[str, Any]]:
+        if self.feature_overrides is not None:
+            return self.feature_overrides
+        cand_id = self.primary_asset_id or next((aid for aid in self.asset_ids if aid in assets), None)
+        a = assets.get(cand_id)
+        if isinstance(a, SequenceAsset) and a.features:
+            return a.features
+        return []
+
+    def to_fasta(self, assets: Dict[str, AssetBase]) -> Optional[str]:
+        seq = self.effective_sequence(assets)
+        if not seq:
+            return None
+        wrapped = "\n".join(seq[i:i+70] for i in range(0, len(seq), 70))
+        return f">{self.name}\n{wrapped}\n"
