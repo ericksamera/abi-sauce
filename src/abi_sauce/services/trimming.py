@@ -3,10 +3,11 @@ from typing import List, Optional, Tuple
 
 # --- Core Mott implementation (Phred -> error prob -> Kadane) ---
 
+
 def mott_trim_quals(
     phred: List[int],
-    error_limit: float = 0.05,   # typical default
-    min_len: int = 20            # keep at least this many bases
+    error_limit: float = 0.05,  # typical default
+    min_len: int = 20,  # keep at least this many bases
 ) -> Tuple[int, int, float]:
     """
     Return (left_idx, right_idx, score) for the max-scoring subarray using
@@ -67,7 +68,9 @@ def trim_trace_asset_mott(
     """
     if not sequence or not phred:
         return None
-    l, r, _ = mott_trim_quals(phred, error_limit=error_limit, min_len=min_len)
-    if r < l:
+    left_trim, right_trim, _ = mott_trim_quals(
+        phred, error_limit=error_limit, min_len=min_len
+    )
+    if right_trim < left_trim:
         return None
-    return l, r, sequence[l : r + 1]
+    return left_trim, right_trim, sequence[left_trim : right_trim + 1]

@@ -5,14 +5,19 @@ from abi_sauce.services.file_manager import FileManager
 from abi_sauce.ui.components import asset_detail
 from abi_sauce.models import SequenceAsset, TraceAsset, AssetBase
 
+
 def viewer_page():
     st.title("👀 Viewer")
-    st.caption("Pick any uploaded file from the sidebar to preview it. AB1 shows chromatogram + sequence; FASTA/GenBank/ApE show sequence (and features if present).")
+    st.caption(
+        "Pick any uploaded file from the sidebar to preview it. AB1 shows chromatogram + sequence; FASTA/GenBank/ApE show sequence (and features if present)."
+    )
 
     fm: FileManager = st.session_state._manager
     assets = fm.list()
     if not assets:
-        st.info("No files yet — go to the Uploads page and add FASTA / GenBank / ApE / AB1.")
+        st.info(
+            "No files yet — go to the Uploads page and add FASTA / GenBank / ApE / AB1."
+        )
         return
 
     # Sidebar selector + filters
@@ -33,7 +38,9 @@ def viewer_page():
         def _include(a: AssetBase) -> bool:
             is_seq = isinstance(a, SequenceAsset)
             is_trace = isinstance(a, TraceAsset)
-            type_ok = (is_seq and "Sequences" in selected_types) or (is_trace and "Traces" in selected_types)
+            type_ok = (is_seq and "Sequences" in selected_types) or (
+                is_trace and "Traces" in selected_types
+            )
             q_ok = (q.lower() in a.name.lower()) if q else True
             return type_ok and q_ok
 
@@ -59,7 +66,10 @@ def viewer_page():
         labels = {a.id: _label(a) for a in filtered}
 
         default_index = 0
-        if "_viewer_selected" in st.session_state and st.session_state._viewer_selected in ids:
+        if (
+            "_viewer_selected" in st.session_state
+            and st.session_state._viewer_selected in ids
+        ):
             default_index = ids.index(st.session_state._viewer_selected)
 
         selected_id = st.selectbox(

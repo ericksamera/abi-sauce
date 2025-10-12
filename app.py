@@ -19,9 +19,9 @@ if "_samples" not in st.session_state:
 nav = st.navigation(
     [
         st.Page(uploads_page, title="Uploads", icon=":material/upload:", default=True),
-        st.Page(viewer_page,  title="Viewer",  icon="👀"),
+        st.Page(viewer_page, title="Viewer", icon="👀"),
         st.Page(samples_page, title="Samples", icon="🧪"),
-        st.Page(align_page,   title="Align",   icon="🧬"),
+        st.Page(align_page, title="Align", icon="🧬"),
     ],
     position="sidebar",
     expanded=True,

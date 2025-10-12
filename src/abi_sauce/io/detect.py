@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Optional, Tuple
+from typing import Literal, Tuple
 
 FileKind = Literal["fasta", "genbank", "ape", "ab1", "unknown"]
 
@@ -7,10 +7,15 @@ FASTA_FIRST_CHARS = (b">",)
 AB1_MAGIC = b"ABIF"  # ABIF header for ABI chromatogram files
 
 EXT_MAP = {
-    ".fa": "fasta", ".fasta": "fasta", ".fna": "fasta",
-    ".gb": "genbank", ".gbk": "genbank", ".gbff": "genbank",
+    ".fa": "fasta",
+    ".fasta": "fasta",
+    ".fna": "fasta",
+    ".gb": "genbank",
+    ".gbk": "genbank",
+    ".gbff": "genbank",
     ".ape": "ape",
-    ".ab1": "ab1", ".abi": "ab1",
+    ".ab1": "ab1",
+    ".abi": "ab1",
 }
 
 

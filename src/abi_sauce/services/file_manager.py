@@ -1,10 +1,8 @@
 from __future__ import annotations
-from dataclasses import asdict
-from typing import Dict, List, Optional, Union
-from uuid import uuid4
+from typing import Dict, List, Optional
 import hashlib
 
-from abi_sauce.models import AssetBase, SequenceAsset, TraceAsset, AssetKind
+from abi_sauce.models import AssetBase, AssetKind
 from abi_sauce.io.detect import identify
 from abi_sauce.io import readers
 
@@ -39,7 +37,9 @@ class FileManager:
         if kind == "fasta":
             assets = readers.read_fasta(name, raw, size, checksum)
         elif kind in ("genbank", "ape"):
-            assets = readers.read_genbank_like(name, raw, size, checksum, ext_hint=norm_ext)
+            assets = readers.read_genbank_like(
+                name, raw, size, checksum, ext_hint=norm_ext
+            )
         elif kind == "ab1":
             assets = readers.read_ab1(name, raw, size, checksum)
         else:

@@ -6,13 +6,16 @@ from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
 from abi_sauce.ui.components import asset_table, asset_detail
 
+
 def uploads_page():
     st.title("📥 Uploads")
 
     fm: FileManager = st.session_state._manager
     sm: SampleManager = st.session_state._samples
 
-    st.caption("Drop FASTA / GenBank / ApE / AB1 files. Each new asset automatically becomes a Sample for editing later.")
+    st.caption(
+        "Drop FASTA / GenBank / ApE / AB1 files. Each new asset automatically becomes a Sample for editing later."
+    )
 
     uploaded = st.file_uploader(
         "Drop files here",

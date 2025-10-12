@@ -42,7 +42,9 @@ def read_fasta(name: str, raw: bytes, size: int, checksum: str) -> List[Sequence
 
 
 # ---------- GenBank / ApE ----------
-def read_genbank_like(name: str, raw: bytes, size: int, checksum: str, ext_hint: str) -> List[SequenceAsset]:
+def read_genbank_like(
+    name: str, raw: bytes, size: int, checksum: str, ext_hint: str
+) -> List[SequenceAsset]:
     """Read GenBank (and ApE, which is GenBank-like) as sequences with features."""
     # Text-mode handle required for 'genbank'
     handle = StringIO(_decode_text(raw))
@@ -85,7 +87,9 @@ def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset
     # Raw channel arrays are often DATA9..DATA12, base order given by FWO_ (e.g., b"GATC").
     # PLOC2 gives base positions (peak indices), PBAS2 gives called sequence, PCON2 gives quality.
     fwo = abif_raw.get("FWO_", b"GATC")
-    order = fwo.decode(errors="ignore") if isinstance(fwo, (bytes, bytearray)) else str(fwo)
+    order = (
+        fwo.decode(errors="ignore") if isinstance(fwo, (bytes, bytearray)) else str(fwo)
+    )
     data_keys = ["DATA9", "DATA10", "DATA11", "DATA12"]
 
     channels = {b: None for b in "ACGT"}
@@ -127,6 +131,8 @@ def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset
         qualities=quals,
         base_positions=ploc,
         channels=channels,
-        meta={"abif_keys": list(abif_raw.keys())[:40]},  # keep lightweight; avoid dumping huge dict
+        meta={
+            "abif_keys": list(abif_raw.keys())[:40]
+        },  # keep lightweight; avoid dumping huge dict
     )
     return [asset]

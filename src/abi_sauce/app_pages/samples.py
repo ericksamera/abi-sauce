@@ -5,9 +5,12 @@ from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
 from abi_sauce.ui.components import sample_table, sample_editor
 
+
 def samples_page():
     st.title("🧪 Samples")
-    st.caption("Each upload is represented as an editable Sample (sequence & features). Edits never mutate the original file.")
+    st.caption(
+        "Each upload is represented as an editable Sample (sequence & features). Edits never mutate the original file."
+    )
 
     fm: FileManager = st.session_state._manager
     sm: SampleManager = st.session_state._samples

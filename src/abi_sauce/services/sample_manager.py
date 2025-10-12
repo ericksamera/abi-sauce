@@ -2,8 +2,9 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from abi_sauce.models import Sample, AssetBase, SequenceAsset, TraceAsset
+from abi_sauce.models import Sample, AssetBase
 from abi_sauce.services.file_manager import FileManager
+
 
 class SampleManager:
     """Owns user-visible 'samples' built on top of raw assets (non-destructive)."""
@@ -39,7 +40,10 @@ class SampleManager:
 
     def assets_view(self) -> Dict[str, AssetBase]:
         # convenience map for render/export
-        return {aid: self.fm.get(aid) for aid in {aid for s in self._samples.values() for aid in s.asset_ids}}
+        return {
+            aid: self.fm.get(aid)
+            for aid in {aid for s in self._samples.values() for aid in s.asset_ids}
+        }
 
     # --- edits ---
     def rename(self, sample_id: str, new_name: str) -> None:
@@ -51,9 +55,13 @@ class SampleManager:
             s.primary_asset_id = asset_id
 
     def set_sequence_override(self, sample_id: str, seq: Optional[str]) -> None:
-        self._samples[sample_id].sequence_override = (seq or "").replace("\n", "").replace("\r", "")
+        self._samples[sample_id].sequence_override = (
+            (seq or "").replace("\n", "").replace("\r", "")
+        )
 
-    def set_feature_overrides(self, sample_id: str, feats: Optional[List[Dict]]) -> None:
+    def set_feature_overrides(
+        self, sample_id: str, feats: Optional[List[Dict]]
+    ) -> None:
         self._samples[sample_id].feature_overrides = feats or []
 
     # --- export ---

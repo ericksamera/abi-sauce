@@ -6,6 +6,7 @@ from Bio.Align import PairwiseAligner
 # Keep the same external mode names for your UI.
 Mode = Literal["globalms", "localms", "globalxx", "localxx"]
 
+
 @dataclass
 class PairwiseResult:
     a_aln: str
@@ -14,6 +15,7 @@ class PairwiseResult:
     start: int
     end: int
     identity: float  # 0..1
+
 
 def _build_gapped_from_alignment(aln, seqA: str, seqB: str) -> tuple[str, str]:
     """Reconstruct gapped strings from PairwiseAligner Alignment."""
@@ -24,11 +26,11 @@ def _build_gapped_from_alignment(aln, seqA: str, seqB: str) -> tuple[str, str]:
     for (sa, ea), (sb, eb) in zip(a_blocks, b_blocks):
         # gaps before the next aligned block
         if ia < sa:
-            outA.append(seqA[ia:sa])            # insertion in A
-            outB.append("-" * (sa - ia))        # gap in B
+            outA.append(seqA[ia:sa])  # insertion in A
+            outB.append("-" * (sa - ia))  # gap in B
         if ib < sb:
-            outA.append("-" * (sb - ib))        # gap in A
-            outB.append(seqB[ib:sb])            # insertion in B
+            outA.append("-" * (sb - ib))  # gap in A
+            outB.append(seqB[ib:sb])  # insertion in B
         # aligned block
         outA.append(seqA[sa:ea])
         outB.append(seqB[sb:eb])
@@ -42,11 +44,13 @@ def _build_gapped_from_alignment(aln, seqA: str, seqB: str) -> tuple[str, str]:
         outB.append(seqB[ib:])
     return "".join(outA), "".join(outB)
 
+
 def _identity(a_aln: str, b_aln: str) -> float:
     pairs = [(a, b) for a, b in zip(a_aln, b_aln) if a != "-" and b != "-"]
     if not pairs:
         return 0.0
     return sum(1 for a, b in pairs if a == b) / len(pairs)
+
 
 def pairwise_align(
     seqA: str,
@@ -79,14 +83,16 @@ def pairwise_align(
         # start/end based on A's aligned coords (best-effort for display)
         start = aln.aligned[0][0][0] if len(aln.aligned[0]) else 0
         end = aln.aligned[0][-1][1] if len(aln.aligned[0]) else len(seqA)
-        results.append(PairwiseResult(
-            a_aln=a_aln,
-            b_aln=b_aln,
-            score=float(aln.score),
-            start=start,
-            end=end,
-            identity=_identity(a_aln, b_aln),
-        ))
+        results.append(
+            PairwiseResult(
+                a_aln=a_aln,
+                b_aln=b_aln,
+                score=float(aln.score),
+                start=start,
+                end=end,
+                identity=_identity(a_aln, b_aln),
+            )
+        )
         if len(results) >= top_n:
             break
     return results

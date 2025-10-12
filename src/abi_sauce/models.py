@@ -5,10 +5,11 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 
+
 class AssetKind(str, Enum):
-    SEQUENCE = "sequence"      # e.g., FASTA/GenBank/ApE
-    TRACE = "trace"            # e.g., AB1 (Sanger chromatogram)
-    
+    SEQUENCE = "sequence"  # e.g., FASTA/GenBank/ApE
+    TRACE = "trace"  # e.g., AB1 (Sanger chromatogram)
+
 
 @dataclass
 class AssetBase:
@@ -17,17 +18,21 @@ class AssetBase:
     ext: str
     size: int
     checksum_md5: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc), init=False
+    )
     kind: AssetKind = field(init=False)
 
 
 @dataclass
 class SequenceAsset(AssetBase):
-    sequence: str               # plain sequence (A/C/G/T, possibly N)
+    sequence: str  # plain sequence (A/C/G/T, possibly N)
     description: str = ""
     length: int = 0
-    meta: Dict[str, Any] = field(default_factory=dict)   # e.g., source, locus, etc.
-    features: List[Dict[str, Any]] = field(default_factory=list)  # simplified feature dicts
+    meta: Dict[str, Any] = field(default_factory=dict)  # e.g., source, locus, etc.
+    features: List[Dict[str, Any]] = field(
+        default_factory=list
+    )  # simplified feature dicts
 
     def __post_init__(self):
         self.kind = AssetKind.SEQUENCE
@@ -38,16 +43,21 @@ class SequenceAsset(AssetBase):
         hdr = header or (self.description or self.name)
         seq = self.sequence
         # wrap 70-chars per FASTA convention
-        wrapped = "\n".join(seq[i:i+70] for i in range(0, len(seq), 70))
+        wrapped = "\n".join(seq[i : i + 70] for i in range(0, len(seq), 70))
         return f">{hdr}\n{wrapped}\n"
+
 
 @dataclass
 class TraceAsset(AssetBase):
     sequence: Optional[str] = None
-    qualities: Optional[List[int]] = None    # per-base PHRED, if present
+    qualities: Optional[List[int]] = None  # per-base PHRED, if present
     base_positions: Optional[List[int]] = None  # peak indices (PLOC2), if present
-    channels: Dict[str, Optional[List[int]]] = field(default_factory=lambda: {"A": None, "C": None, "G": None, "T": None})
-    meta: Dict[str, Any] = field(default_factory=dict)   # e.g., instrument, run date, ABI tags subset
+    channels: Dict[str, Optional[List[int]]] = field(
+        default_factory=lambda: {"A": None, "C": None, "G": None, "T": None}
+    )
+    meta: Dict[str, Any] = field(
+        default_factory=dict
+    )  # e.g., instrument, run date, ABI tags subset
 
     def __post_init__(self):
         self.kind = AssetKind.TRACE
@@ -56,8 +66,11 @@ class TraceAsset(AssetBase):
         if not self.sequence:
             return None
         hdr = header or self.name
-        wrapped = "\n".join(self.sequence[i:i+70] for i in range(0, len(self.sequence), 70))
+        wrapped = "\n".join(
+            self.sequence[i : i + 70] for i in range(0, len(self.sequence), 70)
+        )
         return f">{hdr}\n{wrapped}\n"
+
 
 @dataclass
 class Sample:
@@ -72,14 +85,18 @@ class Sample:
     sequence_override: Optional[str] = None
     feature_overrides: Optional[List[Dict[str, Any]]] = None
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc), init=False
+    )
 
     # helpers (these do not persist assets; managers should pass in assets as a dict)
     def effective_sequence(self, assets: Dict[str, AssetBase]) -> Optional[str]:
         if self.sequence_override:
             return self.sequence_override
         # choose primary, else first sequence-like thing with bases
-        cand_id = self.primary_asset_id or next((aid for aid in self.asset_ids if aid in assets), None)
+        cand_id = self.primary_asset_id or next(
+            (aid for aid in self.asset_ids if aid in assets), None
+        )
         if not cand_id:
             return None
         a = assets.get(cand_id)
@@ -92,7 +109,9 @@ class Sample:
     def effective_features(self, assets: Dict[str, AssetBase]) -> List[Dict[str, Any]]:
         if self.feature_overrides is not None:
             return self.feature_overrides
-        cand_id = self.primary_asset_id or next((aid for aid in self.asset_ids if aid in assets), None)
+        cand_id = self.primary_asset_id or next(
+            (aid for aid in self.asset_ids if aid in assets), None
+        )
         a = assets.get(cand_id)
         if isinstance(a, SequenceAsset) and a.features:
             return a.features
@@ -102,5 +121,5 @@ class Sample:
         seq = self.effective_sequence(assets)
         if not seq:
             return None
-        wrapped = "\n".join(seq[i:i+70] for i in range(0, len(seq), 70))
+        wrapped = "\n".join(seq[i : i + 70] for i in range(0, len(seq), 70))
         return f">{self.name}\n{wrapped}\n"
