@@ -7,10 +7,6 @@ from abi_sauce.ui.components import asset_detail
 
 
 def viewer_page():
-    st.title("👀 Viewer")
-    st.caption(
-        "Pick any uploaded file to preview. AB1 shows chromatogram; FASTA/GenBank/ApE show sequence/features."
-    )
 
     fm: FileManager = st.session_state._manager
 

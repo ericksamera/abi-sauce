@@ -7,7 +7,7 @@ from abi_sauce.services.alignment import pairwise_align
 
 
 def align_page():
-    st.title("🧬 Pairwise alignment")
+    st.title("Pairwise alignment")
     st.caption(
         "Pick any two Samples. Scores are adjustable. This lays groundwork for trace alignment & consensus assembly later."
     )

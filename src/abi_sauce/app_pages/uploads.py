@@ -8,7 +8,7 @@ from abi_sauce.ui.components import asset_table, asset_detail
 
 
 def uploads_page():
-    st.title("📥 Uploads")
+    st.title("Uploads")
 
     fm: FileManager = st.session_state._manager
     sm: SampleManager = st.session_state._samples

@@ -1,18 +1,33 @@
 # src/abi_sauce/ui/plot_helpers.py
-from typing import Dict, List, Optional, Tuple, Literal
-import math
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Literal, Mapping, Sequence, Union
 import plotly.graph_objects as go
 
+from abi_sauce.services import trace_processing as tp
 
-# --- Defensive helpers to avoid Plotly/pandas import-order issues in Streamlit ---
+Number = Union[int, float]
+
+# --- Plotly/Pandas compatibility shim (handles partially-initialized pandas) ---
+try:
+    import _plotly_utils.basevalidators as _bv  # type: ignore
+
+    _pd = getattr(_bv, "pd", None)
+    if _pd is not None and not hasattr(_pd, "Series"):
+        _bv.pd = None
+except Exception:
+    pass
+
+# ---- Color scheme -------------------------------------------------------------
+BASE_COLORS: Dict[str, str] = {"A": "green", "T": "red", "C": "blue", "G": "black"}
+
+
+# ---- small utils --------------------------------------------------------------
+def _clamp(v: int, lo: int, hi: int) -> int:
+    return tp.clamp(v, lo, hi)
 
 
 def _to_simple_list(seq):
-    """
-    Convert many array-like types to a plain Python list.
-    Handles: None, list/tuple, numpy arrays, pandas Series/Index (even if pandas
-    is partially initialized), objects with .tolist(), and generic iterables.
-    """
     if seq is None:
         return None
     if isinstance(seq, (list, tuple)):
@@ -35,17 +50,45 @@ def _to_simple_list(seq):
         return [seq]
 
 
+def _decimate_max_bins_xy(
+    xs: Sequence[Number], ys: Sequence[Number], target_points: int
+) -> Tuple[List[float], List[float]]:
+    xs = _to_simple_list(xs) or []
+    ys = _to_simple_list(ys) or []
+    n = min(len(xs), len(ys))
+    if n <= target_points or target_points <= 0:
+        return xs[:n], ys[:n]
+    bin_sz = max(1, n // target_points)
+    out_x, out_y = [], []
+    for i in range(0, n, bin_sz):
+        block_y = ys[i : i + bin_sz]
+        if not block_y:
+            continue
+        m = max(block_y)
+        j = block_y.index(m)
+        out_y.append(float(m))
+        out_x.append(float(xs[i + j]))
+    return out_x, out_y
+
+
+# ---- plotting primitives ------------------------------------------------------
 def _safe_add_scatter(fig, xs, ys, **scatter_kwargs):
-    """Normalize xs/ys to lists and add a Scatter trace."""
     xs = _to_simple_list(xs)
     ys = _to_simple_list(ys)
-    trace = go.Scatter(x=xs, y=ys, **scatter_kwargs)
-    fig.add_trace(trace)
+    n = len(ys) if ys is not None else 0
+
+    MAX_POINTS = 30000
+    if n > MAX_POINTS:
+        bin_sz = max(1, n // MAX_POINTS)
+        xs = xs[::bin_sz]
+        ys = [max(ys[i : i + bin_sz]) for i in range(0, n, bin_sz)]
+
+    trace_cls = go.Scattergl if (len(ys or []) > 5000) else go.Scatter
+    fig.add_trace(trace_cls(x=xs, y=ys, **scatter_kwargs))
     return fig
 
 
 def _safe_add_bar(fig, xs, ys, **bar_kwargs):
-    """Normalize xs/ys to lists and add a Bar trace."""
     xs = _to_simple_list(xs)
     ys = _to_simple_list(ys)
     trace = go.Bar(x=xs, y=ys, **bar_kwargs)
@@ -53,68 +96,80 @@ def _safe_add_bar(fig, xs, ys, **bar_kwargs):
     return fig
 
 
-def _clamp(v: int, lo: int, hi: int) -> int:
-    return max(lo, min(hi, v))
+def _add_slider_overview_trace(
+    fig: go.Figure,
+    xs: Sequence[Number],
+    ys: Sequence[Number],
+    *,
+    target_points: int = 3000,
+    name: str = "overview",
+    color: Optional[str] = None,
+) -> None:
+    dx, dy = _decimate_max_bins_xy(xs, ys, target_points)
+    fig.add_trace(
+        go.Scatter(
+            x=dx,
+            y=dy,
+            mode="lines",
+            name=name,
+            hoverinfo="skip",
+            showlegend=False,
+            xaxis="x",
+            yaxis="y",
+            line=dict(width=1, color=color),
+            opacity=0.25,
+        )
+    )
 
 
-def _compute_base_windows(ploc: List[int], total_samples: int) -> List[Tuple[int, int]]:
-    """
-    Turn peak locations into per-base sample windows using midpoints between peaks.
-    Returns inclusive (start_idx, end_idx) pairs per base.
-    """
-    n = len(ploc)
-    if n == 0:
-        return []
-    windows: List[Tuple[int, int]] = []
-    mids = [(ploc[i] + ploc[i + 1]) / 2.0 for i in range(n - 1)]
-    for i in range(n):
-        start = 0 if i == 0 else (math.floor(mids[i - 1]) + 1)
-        end = (total_samples - 1) if i == n - 1 else math.floor(mids[i])
-        start = _clamp(start, 0, total_samples - 1)
-        end = _clamp(end, 0, total_samples - 1)
-        if end < start:
-            end = start
-        windows.append((start, end))
-    return windows
+def _add_hatched_band(
+    fig: go.Figure,
+    *,
+    x0: float,
+    x1: float,
+    yref: str = "paper",
+    base_alpha: float = 0.15,
+    stripe_alpha: float = 0.3,
+    max_lines: int = 300,
+    stripe_layer: str = "above",
+) -> None:
+    if x1 <= x0:
+        return
+    fig.add_shape(
+        type="rect",
+        x0=x0,
+        x1=x1,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref=yref,
+        fillcolor=f"rgba(128,128,128,{base_alpha})",
+        layer="below",
+        line_width=0,
+    )
+    width = max(1.0, float(x1 - x0))
+    n_lines = min(max_lines, max(8, int(width / 10)))
+    step = width / n_lines
+    cur = float(x0)
+    for _ in range(n_lines + 1):
+        fig.add_shape(
+            type="line",
+            x0=cur,
+            x1=cur,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref=yref,
+            line=dict(width=1, color=f"rgba(120,120,120,{stripe_alpha})"),
+            layer=stripe_layer,
+        )
+        cur += step
 
 
-def _resample_channel_to_bases(
-    channel: List[float],
-    windows: List[Tuple[int, int]],
-    method: Literal["max", "mean", "median"] = "max",
-) -> List[float]:
-    """Aggregate `channel` samples into one value per base-window."""
-    import statistics
-
-    res: List[float] = []
-    n = len(channel)
-    for s, e in windows:
-        s = _clamp(s, 0, n - 1)
-        e = _clamp(e, 0, n - 1)
-        if e < s:
-            e = s
-        block = channel[s : e + 1]
-        if not block:
-            res.append(0.0)
-            continue
-        if method == "max":
-            res.append(max(block))
-        elif method == "mean":
-            res.append(sum(block) / len(block))
-        elif method == "median":
-            res.append(statistics.median(block))
-        else:
-            res.append(max(block))
-    return res
-
-
-# --- Peak labeling / positioning helpers ---
-
-
+# ---- helpers for peak/hover text ---------------------------------------------
 def _dominant_base_at_peak(
-    p: int, channels: Dict[str, List[float]], window: int = 2
+    p: int, channels: Mapping[str, Sequence[Number]], window: int = 2
 ) -> Optional[str]:
-    """Return the base letter with strongest signal near sample index p (±window)."""
     best_base, best_val = None, float("-inf")
     for b in "ACGT":
         arr = channels.get(b) or []
@@ -126,44 +181,24 @@ def _dominant_base_at_peak(
             continue
         val = max(arr[s : e + 1])
         if val > best_val:
-            best_val = val
+            best_val = float(val)
             best_base = b
     return best_base
 
 
 def _peak_heights_samples(
-    ploc: List[int], channels: Dict[str, List[float]], window: int = 2
+    ploc: List[int], channels: Mapping[str, Sequence[Number]], window: int = 2
 ) -> List[float]:
-    """For each peak location, return the max across A/C/G/T within ±window samples."""
     heights: List[float] = []
     for p in ploc:
-        best = 0.0
+        best: float = 0.0
         for arr in channels.values():
             if not arr:
                 continue
             s = _clamp(p - window, 0, len(arr) - 1)
             e = _clamp(p + window, 0, len(arr) - 1)
             if e >= s:
-                best = max(best, max(arr[s : e + 1]))
-        heights.append(best)
-    return heights
-
-
-def _peak_heights_bases(
-    windows: List[Tuple[int, int]], channels: Dict[str, List[float]]
-) -> List[float]:
-    """Per-base peak heights (for bases mode): max across A/C/G/T within each base window."""
-    heights: List[float] = []
-    for s, e in windows:
-        best = 0.0
-        for arr in channels.values():
-            if not arr:
-                continue
-            n = len(arr)
-            ss = _clamp(s, 0, n - 1)
-            ee = _clamp(e, 0, n - 1)
-            if ee >= ss:
-                best = max(best, max(arr[ss : ee + 1]))
+                best = max(best, float(max(arr[s : e + 1])))
         heights.append(best)
     return heights
 
@@ -172,10 +207,9 @@ def _peak_hover_texts(
     ploc: List[int],
     seq_len: int,
     seq: Optional[str],
-    channels: Dict[str, List[float]],
-    quals: Optional[List[float]],
+    channels: Mapping[str, Sequence[Number]],
+    quals: Optional[Sequence[Number]],
 ) -> List[str]:
-    """Hover strings for each base: 'Base N: {dominant}' (+ called base if different) + sample + Q."""
     texts: List[str] = []
     for i in range(seq_len):
         p = ploc[i] if i < len(ploc) else (ploc[-1] if ploc else 0)
@@ -196,306 +230,378 @@ def _peak_hover_texts(
     return texts
 
 
-# --- Main API ---
+# ---- public API (split) ------------------------------------------------------
+@dataclass
+class TraceData:
+    channels: Mapping[str, Sequence[Number]]
+    ploc: List[int]
+    seq_len: int
+    quals: Optional[Sequence[Number]] = None
+    seq: Optional[str] = None
 
 
-def build_trace_fig(
-    channels: Dict[str, List[float]],
-    ploc: List[int],
-    seq_len: Optional[int] = None,
-    quals: Optional[List[float]] = None,
-    seq: Optional[str] = None,
-    mode: Literal["samples", "bases"] = "samples",
-    resample_method: Literal["max", "mean", "median"] = "max",
-    show_trim: bool = True,
-    trim_range: Optional[
-        Tuple[int, int]
-    ] = None,  # (left_base_idx, right_base_idx), 1-based inclusive
-    uirevision: str = "chrom_trim_base_ticks_v1",
-    height: int = 340,
-    show_grid: bool = True,
-    peak_only_hover: bool = True,  # if True, only peaks show hover text
-    show_rangeslider: bool = True,  # NEW: show the x-axis range slider
-) -> go.Figure:
-    """
-    Build a Plotly Figure for chromatogram-like signal plotting.
-    - Invisible (but hoverable) peak markers positioned at peak tops.
-    - PHRED bars fill the entire inter-peak region in 'samples' mode (midpoint-to-midpoint).
-      In 'bases' mode, bars fill each base cell.
-    - X-axis range slider enabled (toggle via show_rangeslider).
-    """
+@dataclass
+class TracePlotConfig:
+    mode: Literal["samples", "bases"] = "samples"
+    resample_method: Literal["max", "mean", "median"] = "max"
+    show_trim: bool = True
+    trim_range: Optional[Tuple[int, int]] = None  # 1-based inclusive
+    uirevision: str = "chrom_trim_base_ticks_v1"
+    height: int = 340
+    show_grid: bool = True
+    peak_only_hover: bool = True
+    show_rangeslider: bool = True
+    initial_base_span: int = 20
+    base_tick_every: int = 10
+    # NEW: control range application
+    x_range: Optional[Tuple[float, float]] = None
+    use_initial_range: bool = False
 
-    # sizes and defaults
-    total_samples = next((len(arr) for arr in channels.values()), 0)
-    if seq_len is None:
-        seq_len = len(ploc)
 
-    # align ploc length
+def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> Dict[str, object]:
+    channels = data.channels
+    ploc = list(data.ploc or [])
+    seq_len = int(data.seq_len if data.seq_len is not None else len(ploc))
+    quals = list(data.quals) if data.quals is not None else None
+    seq = data.seq
+
+    total_samples = max((len(arr) for arr in channels.values() if arr), default=0)
     if len(ploc) < seq_len:
         ploc = (ploc[:] + [total_samples - 1] * (seq_len - len(ploc)))[:seq_len]
     elif len(ploc) > seq_len:
         ploc = ploc[:seq_len]
 
-    windows = _compute_base_windows(ploc, total_samples)
-
-    # y scaling
+    windows = tp.compute_base_windows(ploc, total_samples)
+    base_span = max(1, min(cfg.initial_base_span, max(seq_len, 1)))
     max_signal = max((max(arr) for arr in channels.values() if arr), default=0.0)
-    y_max = max_signal * 1.08 if max_signal > 0 else 1.0
-
-    fig = go.Figure()
-
-    # hover settings
-    channel_hoverinfo = "skip" if peak_only_hover else "x+y+name"
-    bar_hoverinfo = "skip" if peak_only_hover else "x+y"
-
-    # precompute hover texts
+    y_max = float(max_signal) * 1.08 if max_signal > 0 else 1.0
     peak_htexts = _peak_hover_texts(ploc, seq_len, seq, channels, quals)
 
-    # transparent marker style (hoverable but invisible)
-    invisible_marker = dict(
-        size=16,  # large hitbox
-        color="rgba(0,0,0,0)",  # fully transparent
-        line=dict(width=0),
-        symbol="circle",
+    out: Dict[str, object] = dict(
+        seq_len=seq_len,
+        total_samples=total_samples,
+        windows=windows,
+        y_max=y_max,
+        peak_htexts=peak_htexts,
+        quals=None,
     )
 
-    if mode == "samples":
+    if quals is not None:
+        q_list = list(quals)
+        if len(q_list) < seq_len:
+            q_list.extend([0] * (seq_len - len(q_list)))
+        elif len(q_list) > seq_len:
+            q_list = q_list[:seq_len]
+        out["quals"] = q_list
+
+    if cfg.mode == "samples":
         xs = list(range(total_samples))
-        for base_letter, arr in channels.items():
-            _safe_add_scatter(
-                fig,
-                xs,
-                arr,
-                mode="lines",
-                name=base_letter,
-                hoverinfo=channel_hoverinfo,
-                hovertemplate=(
-                    None if peak_only_hover else "%{y}<extra>%{fullData.name}</extra>"
-                ),
-                line=dict(width=1.5),
-                opacity=0.95,
-            )
-
-        # invisible markers at actual peak tops
         peak_ys = _peak_heights_samples(ploc, channels, window=2)
-        _safe_add_scatter(
-            fig,
-            ploc,
-            peak_ys,
-            mode="markers",
-            marker=invisible_marker,
-            name="peaks",
-            hoverinfo="text",
-            hovertext=peak_htexts,
-            showlegend=False,
-        )
-
-        xaxis_title = "Sample index (base ticks shown below)"
-        x_range = [0, max(total_samples - 1, 0)]
-        tick_step = 1 if seq_len <= 50 else max(1, seq_len // 50)
-        tickvals = [ploc[i] for i in range(0, seq_len, tick_step)]
-        ticktext = [str(i + 1) for i in range(0, seq_len, tick_step)]
-
-    else:  # mode == 'bases'
-        xs = list(range(1, seq_len + 1))
-
-        if not windows:
-            for base_letter, _ in channels.items():
-                _safe_add_scatter(
-                    fig,
-                    xs,
-                    [0] * seq_len,
-                    mode="lines",
-                    name=base_letter,
-                    hoverinfo=channel_hoverinfo,
-                )
-            peak_ys_bases = [0.0] * seq_len
+        if windows:
+            x0 = windows[0][0]
+            x1 = windows[min(base_span - 1, len(windows) - 1)][1]
         else:
-            resampled_by_base: Dict[str, List[float]] = {}
-            for base_letter, arr in channels.items():
-                resampled_by_base[base_letter] = _resample_channel_to_bases(
-                    arr, windows, method=resample_method
-                )
-                _safe_add_scatter(
-                    fig,
-                    xs,
-                    resampled_by_base[base_letter],
-                    mode="lines",
-                    name=base_letter,
-                    hoverinfo=channel_hoverinfo,
-                    hovertemplate=(
-                        None
-                        if peak_only_hover
-                        else "%{y}<extra>%{fullData.name}</extra>"
-                    ),
-                    line=dict(width=1.5),
-                )
-            peak_ys_bases = [
+            sppb = total_samples / max(seq_len, 1)
+            x0, x1 = 0, int(round(base_span * sppb))
+        tick_bases = list(range(cfg.base_tick_every, seq_len + 1, cfg.base_tick_every))
+        if ploc:
+            tickvals = [ploc[b - 1] for b in tick_bases if (b - 1) < len(ploc)]
+        else:
+            sppb = total_samples / max(seq_len, 1)
+            tickvals = [int(round(b * sppb)) for b in tick_bases]
+        out.update(
+            dict(
+                xs_samples=xs,
+                peak_ys=peak_ys,
+                initial_x_range=[x0, x1],
+                tickvals=tickvals,
+                ticktext=[str(b) for b in tick_bases],
+                q_centers=[(s + e) / 2.0 for (s, e) in windows][:seq_len],
+                q_widths=[(e - s + 1) for (s, e) in windows][:seq_len],
+            )
+        )
+    else:
+        xs = list(range(1, seq_len + 1))
+        if windows:
+            resampled = tp.per_base_aggregate(
+                channels, windows, method=cfg.resample_method
+            )
+            peak_ys = [
                 max(
-                    resampled_by_base.get("A", [0] * seq_len)[i],
-                    resampled_by_base.get("C", [0] * seq_len)[i],
-                    resampled_by_base.get("G", [0] * seq_len)[i],
-                    resampled_by_base.get("T", [0] * seq_len)[i],
+                    resampled.get("A", [0] * seq_len)[i],
+                    resampled.get("C", [0] * seq_len)[i],
+                    resampled.get("G", [0] * seq_len)[i],
+                    resampled.get("T", [0] * seq_len)[i],
                 )
                 for i in range(seq_len)
             ]
-
-        _safe_add_scatter(
-            fig,
-            xs[: len(peak_htexts)],
-            peak_ys_bases[: len(peak_htexts)],
-            mode="markers",
-            marker=invisible_marker,  # invisible but hoverable
-            name="peaks",
-            hoverinfo="text",
-            hovertext=peak_htexts,
-            showlegend=False,
+        else:
+            resampled = {k: [0.0] * seq_len for k in "ACGT"}
+            peak_ys = [0.0] * seq_len
+        out.update(
+            dict(
+                xs_bases=xs,
+                resampled=resampled,
+                peak_ys=peak_ys,
+                initial_x_range=[0.5, base_span + 0.5],
+            )
         )
 
-        xaxis_title = "Base number"
-        x_range = [0.5, seq_len + 0.5]
-        if seq_len <= 50:
-            tickvals = xs
-            ticktext = [str(i) for i in xs]
-        else:
-            step = max(1, seq_len // 50)
-            tickvals = [i for i in xs if (i - 1) % step == 0]
-            ticktext = [str(i) for i in tickvals]
+    return out
 
-    # quality overlay (PHRED) — with full inter-peak width in samples mode
-    if quals:
-        qlen = len(quals)
-        if qlen < seq_len:
-            quals = quals + [0] * (seq_len - qlen)
-        elif qlen > seq_len:
-            quals = quals[:seq_len]
 
-        if mode == "samples":
-            if windows:
-                q_centers = [(s + e) / 2.0 for (s, e) in windows][: len(quals)]
-                q_widths = [(e - s + 1) for (s, e) in windows][: len(quals)]
-                q_x = q_centers
-                q_y = quals[: len(q_x)]
-                _safe_add_bar(
-                    fig,
-                    q_x,
-                    q_y,
-                    name="quality",
-                    width=q_widths,  # variable widths (midpoint-to-midpoint)
-                    marker=dict(opacity=0.35),
-                    yaxis="y2",
-                    hoverinfo=bar_hoverinfo,
-                    showlegend=True,
-                )
-            else:
-                q_x = ploc[: len(quals)]
-                q_y = quals[: len(q_x)]
-                _safe_add_bar(
-                    fig,
-                    q_x,
-                    q_y,
-                    name="quality",
-                    marker=dict(opacity=0.35),
-                    yaxis="y2",
-                    hoverinfo=bar_hoverinfo,
-                    showlegend=True,
-                )
-        else:
-            q_x = list(range(1, seq_len + 1))
-            q_y = quals
+def render_trace_layers(
+    data: TraceData, cfg: TracePlotConfig, layers: Dict[str, object]
+) -> go.Figure:
+    """
+    IMPORTANT: we only set x-axis 'range' when cfg.x_range is provided OR
+    cfg.use_initial_range is True. Otherwise, uirevision preserves the user's view.
+    """
+    fig = go.Figure()
+    channels = data.channels
+
+    channel_hoverinfo = "skip" if cfg.peak_only_hover else "x+y+name"
+    bar_hoverinfo = "skip" if cfg.peak_only_hover else "x+y"
+    invisible_marker = dict(
+        size=16, color="rgba(0,0,0,0)", line=dict(width=0), symbol="circle"
+    )
+
+    # Layout
+    fig.update_layout(
+        height=cfg.height,
+        uirevision=cfg.uirevision,
+        dragmode="pan",
+        margin=dict(l=40, r=40, t=40, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="closest",
+        modebar=dict(remove=["lasso2d", "select2d"]),
+    )
+
+    # PHRED bars
+    q = layers.get("quals")
+    if q is not None:
+        if cfg.mode == "samples":
             _safe_add_bar(
                 fig,
-                q_x,
-                q_y,
+                layers["q_centers"],
+                q[: len(layers["q_centers"])],
                 name="quality",
-                width=0.98,  # fill the base cell
-                marker=dict(opacity=0.35),
+                width=layers["q_widths"],
+                marker=dict(opacity=0.18),
+                yaxis="y2",
+                hoverinfo=bar_hoverinfo,
+                showlegend=True,
+            )
+        else:
+            _safe_add_bar(
+                fig,
+                layers["xs_bases"],
+                q,
+                name="quality",
+                width=0.98,
+                marker=dict(opacity=0.18),
                 yaxis="y2",
                 hoverinfo=bar_hoverinfo,
                 showlegend=True,
             )
 
-    # layout and axes
-    fig.update_layout(
-        height=height,
-        uirevision=uirevision,
-        margin=dict(l=40, r=40, t=40, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        hovermode="closest",  # only point under cursor gets hover
-        modebar=dict(remove=["lasso2d", "select2d"]),
-    )
+    # Hatched OUTSIDE the keep region
+    if cfg.show_trim and cfg.trim_range:
+        left_base, right_base = map(int, cfg.trim_range)
+        if cfg.mode == "samples":
+            windows = layers["windows"]
+            total = int(layers["total_samples"])
+            if 1 < left_base <= len(windows):
+                _add_hatched_band(fig, x0=0, x1=windows[left_base - 1][0])
+            if 1 <= right_base < len(windows):
+                _add_hatched_band(fig, x0=windows[right_base - 1][1], x1=total - 1)
+        else:
+            seq_len = int(layers["seq_len"])
+            if left_base > 1:
+                _add_hatched_band(fig, x0=0.5, x1=(left_base - 0.5))
+            if right_base < seq_len:
+                _add_hatched_band(fig, x0=(right_base + 0.5), x1=(seq_len + 0.5))
 
-    # X-axis + range slider
+    # Slider overview
+    if cfg.show_rangeslider:
+        if cfg.mode == "samples":
+            xs_over = layers["xs_samples"]
+            for base_letter, arr in channels.items():
+                _add_slider_overview_trace(
+                    fig,
+                    xs_over,
+                    arr or [],
+                    target_points=3000,
+                    name=f"{base_letter} overview",
+                    color=BASE_COLORS.get(base_letter),
+                )
+        else:
+            xs_over = layers["xs_bases"]
+            resampled = layers["resampled"]
+            for base_letter in "ACGT":
+                _add_slider_overview_trace(
+                    fig,
+                    xs_over,
+                    resampled.get(base_letter, []),
+                    target_points=2000,
+                    name=f"{base_letter} overview",
+                    color=BASE_COLORS.get(base_letter),
+                )
+
+    # Main lines + invisible peak markers
+    if cfg.mode == "samples":
+        xs_main = layers["xs_samples"]
+        for base_letter, arr in channels.items():
+            _safe_add_scatter(
+                fig,
+                xs_main,
+                arr,
+                mode="lines",
+                name=base_letter,
+                hoverinfo=channel_hoverinfo,
+                hovertemplate=(
+                    None
+                    if cfg.peak_only_hover
+                    else "%{y}<extra>%{fullData.name}</extra>"
+                ),
+                line=dict(width=1.5, color=BASE_COLORS.get(base_letter)),
+                opacity=0.95,
+            )
+        fig.add_trace(
+            go.Scatter(
+                x=data.ploc,
+                y=layers["peak_ys"],
+                mode="markers",
+                marker=invisible_marker,
+                name="peaks",
+                hoverinfo="text",
+                hovertext=layers["peak_htexts"],
+                showlegend=False,
+            )
+        )
+        xaxis_title = "Sample index (base ticks shown below)"
+        xaxis_tick_kwargs = dict(
+            tickmode="array", tickvals=layers["tickvals"], ticktext=layers["ticktext"]
+        )
+    else:
+        xs_main = layers["xs_bases"]
+        resampled = layers["resampled"]
+        for base_letter in "ACGT":
+            _safe_add_scatter(
+                fig,
+                xs_main,
+                resampled.get(base_letter, [0] * len(xs_main)),
+                mode="lines",
+                name=base_letter,
+                hoverinfo=channel_hoverinfo,
+                hovertemplate=(
+                    None
+                    if cfg.peak_only_hover
+                    else "%{y}<extra>%{fullData.name}</extra>"
+                ),
+                line=dict(width=1.5, color=BASE_COLORS.get(base_letter)),
+            )
+        fig.add_trace(
+            go.Scatter(
+                x=xs_main[: len(layers["peak_htexts"])],
+                y=layers["peak_ys"][: len(layers["peak_htexts"])],
+                mode="markers",
+                marker=invisible_marker,
+                name="peaks",
+                hoverinfo="text",
+                hovertext=layers["peak_htexts"],
+                showlegend=False,
+            )
+        )
+        xaxis_title = "Base number"
+        xaxis_tick_kwargs = dict(
+            tickmode="linear",
+            dtick=max(1, int(cfg.base_tick_every)),
+            tick0=cfg.base_tick_every,
+        )
+
+    # Axes — apply range only when requested
+    x_range_to_apply: Optional[Tuple[float, float]] = None
+    if cfg.x_range is not None:
+        x_range_to_apply = cfg.x_range
+    elif cfg.use_initial_range:
+        x0, x1 = layers["initial_x_range"]
+        x_range_to_apply = (float(x0), float(x1))
+
     fig.update_xaxes(
         title_text=xaxis_title,
+        **({"range": x_range_to_apply} if x_range_to_apply is not None else {}),
         showgrid=False,
-        range=x_range,
-        tickmode="array",
-        tickvals=tickvals if "tickvals" in locals() else None,
-        ticktext=ticktext if "ticktext" in locals() else None,
-        tickangle=0,
         zeroline=False,
-        rangeslider=dict(visible=show_rangeslider, thickness=0.12),  # <-- range slider
+        showticklabels=True,
+        rangeslider=dict(visible=cfg.show_rangeslider, thickness=0.12),
+        **xaxis_tick_kwargs,
     )
-
-    # primary yaxis (signals)
     fig.update_yaxes(
         title_text="Signal intensity",
-        range=[0, y_max],
-        showgrid=show_grid,
+        range=[0, layers["y_max"]],
+        showgrid=cfg.show_grid,
         zeroline=False,
     )
 
-    # secondary y-axis for quality scores (if present)
-    if quals:
-        qmax = max(quals) if quals else 1
+    if layers.get("quals") is not None:
+        qmax = max(layers["quals"]) if layers["quals"] else 1
         fig.update_layout(
             yaxis2=dict(
                 title="PHRED",
                 overlaying="y",
                 side="right",
-                range=[0, max(1, qmax * 1.05)],
+                range=[0, max(1, float(qmax) * 1.05)],
                 showgrid=False,
             )
         )
 
-    # optional trim highlight
-    if show_trim and trim_range:
-        left_base, right_base = map(int, trim_range)
-        if mode == "samples":
-            if (
-                windows
-                and 1 <= left_base <= len(windows)
-                and 1 <= right_base <= len(windows)
-            ):
-                x0 = windows[left_base - 1][0]
-                x1 = windows[right_base - 1][1]
-                fig.add_shape(
-                    type="rect",
-                    x0=x0,
-                    x1=x1,
-                    y0=0,
-                    y1=y_max,
-                    xref="x",
-                    yref="y",
-                    fillcolor="LightSalmon",
-                    opacity=0.18,
-                    layer="below",
-                    line_width=0,
-                )
-        else:
-            fig.add_shape(
-                type="rect",
-                x0=left_base - 0.5,
-                x1=right_base + 0.5,
-                y0=0,
-                y1=1,
-                xref="x",
-                yref="paper",
-                fillcolor="LightSalmon",
-                opacity=0.18,
-                layer="below",
-                line_width=0,
-            )
-
     return fig
+
+
+# ---- Back-compat wrapper ------------------------------------------------------
+def build_trace_fig(
+    channels: Mapping[str, Sequence[Number]],
+    ploc: List[int],
+    seq_len: Optional[int] = None,
+    quals: Optional[Sequence[Number]] = None,
+    seq: Optional[str] = None,
+    mode: Literal["samples", "bases"] = "samples",
+    resample_method: Literal["max", "mean", "median"] = "max",
+    show_trim: bool = True,
+    trim_range: Optional[Tuple[int, int]] = None,
+    uirevision: str = "chrom_trim_base_ticks_v1",
+    height: int = 340,
+    show_grid: bool = True,
+    peak_only_hover: bool = True,
+    show_rangeslider: bool = True,
+    *,
+    initial_base_span: int = 20,
+    base_tick_every: int = 10,
+    x_range: Optional[Tuple[float, float]] = None,
+    use_initial_range: bool = False,
+) -> go.Figure:
+    data = TraceData(
+        channels=channels,
+        ploc=ploc,
+        seq_len=(len(ploc) if seq_len is None else seq_len),
+        quals=quals,
+        seq=seq,
+    )
+    cfg = TracePlotConfig(
+        mode=mode,
+        resample_method=resample_method,
+        show_trim=show_trim,
+        trim_range=trim_range,
+        uirevision=uirevision,
+        height=height,
+        show_grid=show_grid,
+        peak_only_hover=peak_only_hover,
+        show_rangeslider=show_rangeslider,
+        initial_base_span=initial_base_span,
+        base_tick_every=base_tick_every,
+        x_range=x_range,
+        use_initial_range=use_initial_range,
+    )
+    layers = prepare_trace_layers(data, cfg)
+    return render_trace_layers(data, cfg, layers)

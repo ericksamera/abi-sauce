@@ -67,4 +67,4 @@ class SampleManager:
     # --- export ---
     def fasta(self, sample_id: str) -> Optional[str]:
         s = self._samples[sample_id]
-        return s.to_fasta(self.fm._assets)  # uses the internal view; safe read
+        return s.to_fasta(self.fm._assets)

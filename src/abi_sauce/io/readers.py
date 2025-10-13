@@ -1,11 +1,12 @@
 from __future__ import annotations
-from io import StringIO, BytesIO
-from typing import List, Dict, Any
+from io import StringIO
+from typing import List
 from uuid import uuid4
 
 from Bio import SeqIO
 
 from abi_sauce.models import SequenceAsset, TraceAsset
+from abi_sauce.services.feature_ops import feature_from_biopython, features_to_dicts
 
 
 def _mk_id() -> str:
@@ -22,7 +23,6 @@ def _decode_text(raw: bytes) -> str:
 
 # ---------- FASTA ----------
 def read_fasta(name: str, raw: bytes, size: int, checksum: str) -> List[SequenceAsset]:
-    # Biopython expects text-mode handle for text formats like FASTA
     handle = StringIO(_decode_text(raw))
     assets: List[SequenceAsset] = []
     for rec in SeqIO.parse(handle, "fasta"):
@@ -46,19 +46,13 @@ def read_genbank_like(
     name: str, raw: bytes, size: int, checksum: str, ext_hint: str
 ) -> List[SequenceAsset]:
     """Read GenBank (and ApE, which is GenBank-like) as sequences with features."""
-    # Text-mode handle required for 'genbank'
     handle = StringIO(_decode_text(raw))
     assets: List[SequenceAsset] = []
     for rec in SeqIO.parse(handle, "genbank"):
-        feats = []
-        for f in rec.features:
-            feats.append(
-                {
-                    "type": f.type,
-                    "location": str(f.location),
-                    "qualifiers": {k: v for k, v in (f.qualifiers or {}).items()},
-                }
-            )
+        # Convert to typed Feature, then to dicts (UI-friendly) for now.
+        typed = [feature_from_biopython(f, len(rec.seq)) for f in rec.features]
+        feats = features_to_dicts(typed)
+
         assets.append(
             SequenceAsset(
                 id=_mk_id(),
@@ -77,49 +71,9 @@ def read_genbank_like(
 
 # ---------- AB1 ----------
 def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset]:
-    # Binary-mode handle for AB1 (ABIF)
-    handle = BytesIO(raw)
-    rec = SeqIO.read(handle, "abi")  # raises on failure
+    from abi_sauce.services.ab1 import parse_ab1
 
-    abif_raw: Dict[str, Any] = dict(rec.annotations.get("abif_raw", {}))
-
-    # These keys are common across many instruments.
-    # Raw channel arrays are often DATA9..DATA12, base order given by FWO_ (e.g., b"GATC").
-    # PLOC2 gives base positions (peak indices), PBAS2 gives called sequence, PCON2 gives quality.
-    fwo = abif_raw.get("FWO_", b"GATC")
-    order = (
-        fwo.decode(errors="ignore") if isinstance(fwo, (bytes, bytearray)) else str(fwo)
-    )
-    data_keys = ["DATA9", "DATA10", "DATA11", "DATA12"]
-
-    channels = {b: None for b in "ACGT"}
-    for base, key in zip(order, data_keys):
-        arr = abif_raw.get(key)
-        if arr is not None:
-            try:
-                channels[base] = list(map(int, arr))
-            except Exception:
-                channels[base] = None
-
-    seq = str(rec.seq) if getattr(rec, "seq", None) else None
-
-    # Qualities (PHRED)
-    quals = None
-    if hasattr(rec, "letter_annotations") and "phred_quality" in rec.letter_annotations:
-        quals = list(map(int, rec.letter_annotations["phred_quality"]))
-    elif "PCON2" in abif_raw:
-        try:
-            quals = list(map(int, abif_raw["PCON2"]))
-        except Exception:
-            pass
-
-    # Base positions (peaks)
-    ploc = None
-    if "PLOC2" in abif_raw:
-        try:
-            ploc = list(map(int, abif_raw["PLOC2"]))
-        except Exception:
-            pass
+    channels, seq, quals, ploc, meta = parse_ab1(raw)
 
     asset = TraceAsset(
         id=_mk_id(),
@@ -131,8 +85,6 @@ def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset
         qualities=quals,
         base_positions=ploc,
         channels=channels,
-        meta={
-            "abif_keys": list(abif_raw.keys())[:40]
-        },  # keep lightweight; avoid dumping huge dict
+        meta=meta,
     )
     return [asset]

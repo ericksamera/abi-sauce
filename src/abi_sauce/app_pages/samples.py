@@ -8,7 +8,7 @@ from abi_sauce.ui.components import sample_editor
 
 
 def samples_page():
-    st.title("🧪 Samples")
+    st.title("Samples")
     st.caption(
         "Each upload becomes an editable Sample. Edits never mutate the original file."
     )
