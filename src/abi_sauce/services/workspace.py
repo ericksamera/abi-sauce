@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Dict, Tuple
+
+import contextlib
 import json
 from datetime import datetime
 
-from abi_sauce.models import SequenceAsset, TraceAsset, Sample
+from abi_sauce.models import Sample, SequenceAsset, TraceAsset
 from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
 
@@ -80,7 +81,7 @@ class WorkspaceManager:
         payload: str,
         *,
         clear_first: bool = True,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Clear managers and restore a snapshot. Returns (n_assets, n_samples)."""
         snapshot = json.loads(payload)
         if clear_first:
@@ -88,7 +89,7 @@ class WorkspaceManager:
             sm._samples.clear()
 
         # restore assets
-        by_checksum: Dict[str, list] = {}
+        by_checksum: dict[str, list] = {}
         for item in snapshot.get("assets", []):
             typ = item["type"]
             d = item["data"]
@@ -121,10 +122,8 @@ class WorkspaceManager:
             else:
                 continue
             # created_at is init=False, set post-init
-            try:
+            with contextlib.suppress(Exception):
                 a.created_at = datetime.fromisoformat(d["created_at"])
-            except Exception:
-                pass
             fm._assets[a.id] = a
             by_checksum.setdefault(a.checksum_md5, []).append(a.id)
         fm._by_checksum = by_checksum
@@ -141,10 +140,8 @@ class WorkspaceManager:
             )
             sample.sequence_override = s.get("sequence_override")
             sample.feature_overrides = s.get("feature_overrides")
-            try:
+            with contextlib.suppress(Exception):
                 sample.created_at = datetime.fromisoformat(s["created_at"])
-            except Exception:
-                pass
             sm._samples[sample.id] = sample
 
         return len(fm._assets), len(sm._samples)

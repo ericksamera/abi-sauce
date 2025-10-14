@@ -26,5 +26,5 @@ def test_resample_channel_to_bases_max_mean():
     assert 14 <= res_max[0] <= 16
     assert 24 <= res_max[1] <= 26
     assert res_max[2] == 39
-    for m, M in zip(res_mean, res_max):
+    for m, M in zip(res_mean, res_max, strict=False):
         assert m <= M

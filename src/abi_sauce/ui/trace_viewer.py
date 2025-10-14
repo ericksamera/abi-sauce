@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Optional, Dict, Sequence, Tuple
+
+from collections.abc import Sequence
+
 import streamlit as st
 
 from abi_sauce.models import TraceAsset
-from abi_sauce.services.sample_manager import SampleManager
 from abi_sauce.services.file_manager import FileManager
+from abi_sauce.services.sample_manager import SampleManager
 from abi_sauce.services.trimming import trim_trace_asset_mott
+from abi_sauce.ui.defaults import BASE_TICK_EVERY, INITIAL_BASE_SPAN, init_state
 from abi_sauce.ui.plot_helpers import build_trace_fig
-from abi_sauce.ui.defaults import INITIAL_BASE_SPAN, BASE_TICK_EVERY, init_state
 from abi_sauce.ui.sequence_viewer import render_sequence_block
 
 
@@ -29,25 +31,24 @@ def render_trace_asset(asset: TraceAsset) -> None:
     seq = asset.sequence or ""
     ploc = asset.base_positions or []
     quals = asset.qualities or []
-    channels: Dict[str, Sequence[int]] = {
+    channels: dict[str, Sequence[int]] = {
         k: (asset.channels.get(k) or []) for k in ("A", "C", "G", "T")
     }
 
-    if not any(channels.values()):
-        st.info("No channel data found in this AB1.")
-        # Still show the sequence block if we have one
-        if seq:
-            st.divider()
-            render_sequence_block(
-                name=asset.name,
-                sequence=seq,
-                features=None,
-                fasta_text=asset.to_fasta(),
-                download_filename=f"{asset.name}.fasta",
-                title="Sequence (called)",
-                colorize=False,
-            )
-        return
+    # ---- Compute Mott trim as early as possible (used even if no channels) ----
+    l_idx = r_idx = None  # 0-based inclusive
+    trimmed_seq: str | None = None
+    if seq and quals:
+        out = trim_trace_asset_mott(seq, quals, error_limit=0.05, min_len=20)
+        if out:
+            l_idx, r_idx, trimmed_seq = out
+
+    # derive keep window once; reused below
+    keep_0b: tuple[int, int] | None = (
+        (l_idx, r_idx)
+        if (l_idx is not None and r_idx is not None and l_idx <= r_idx)
+        else None
+    )
 
     # ---- Quick diagnostics / friendly fallbacks ----
     dbg_key = f"abif_dbg_{asset.id}"
@@ -65,6 +66,26 @@ def render_trace_asset(asset: TraceAsset) -> None:
     if not quals:
         st.info("No PHRED qualities detected — quality bars hidden.")
 
+    # If there are no channels at all, still show a useful, colorized sequence block.
+    if not any(channels.values()):
+        st.info("No channel data found in this AB1.")
+        if seq:
+            st.divider()
+            render_sequence_block(
+                name=asset.name,
+                sequence=seq,
+                features=None,
+                fasta_text=asset.to_fasta(),
+                download_filename=f"{asset.name}.fasta",
+                title="Sequence (called)",
+                colorize=True,
+                color_bases=True,
+                keep_range_0b=keep_0b,
+                crosshatch_trim=True,
+                plotly_strip=True,
+            )
+        return
+
     # ---- State init for chart + trim ----
     prefix = f"traceopts_{asset.id}"
     init_state(prefix)
@@ -77,19 +98,20 @@ def render_trace_asset(asset: TraceAsset) -> None:
     plot_height = int(st.session_state[f"{prefix}_height"])
     initialized = bool(st.session_state[f"{prefix}_initialized"])
 
-    # ---- Compute Mott trim once (used in chart + sequence highlight) ----
-    l_idx = r_idx = None  # 0-based inclusive
-    trimmed_seq: Optional[str] = None
+    # Recompute trim with current UI values (for downstream display)
     if seq and quals:
         out = trim_trace_asset_mott(seq, quals, error_limit=err_limit, min_len=min_len)
         if out:
             l_idx, r_idx, trimmed_seq = out
+            keep_0b = (l_idx, r_idx)
 
     # 1-based inclusive for the figure helper
     seq_len = len(seq) if seq else len(ploc)
-    trim_range_1b: Optional[Tuple[int, int]] = None
-    if l_idx is not None and r_idx is not None and l_idx <= r_idx:
-        trim_range_1b = (int(l_idx) + 1, int(r_idx) + 1)
+    trim_range_1b: tuple[int, int] | None = (
+        (l_idx + 1, r_idx + 1)
+        if (l_idx is not None and r_idx is not None and l_idx <= r_idx)
+        else None
+    )
 
     # ---- Chart ----
     fig = build_trace_fig(
@@ -143,6 +165,7 @@ def render_trace_asset(asset: TraceAsset) -> None:
 
         def _reset_view():
             st.session_state[f"{prefix}_initialized"] = False
+            # Full app rerun so the initial range applies again (per current API).
             st.rerun()
 
         with c1:
@@ -175,7 +198,7 @@ def render_trace_asset(asset: TraceAsset) -> None:
             st.session_state[minlen_key] = max(1, int(new_minlen))
             st.rerun()
 
-        # Recompute for display below if user changed values inside the expander
+        # re-evaluate with possibly updated values
         if seq and quals:
             out = trim_trace_asset_mott(
                 seq,
@@ -186,6 +209,7 @@ def render_trace_asset(asset: TraceAsset) -> None:
             if out:
                 l_idx, r_idx, trimmed_seq = out
                 trim_range_1b = (l_idx + 1, r_idx + 1)
+                keep_0b = (l_idx, r_idx)
 
         if trimmed_seq:
             fasta = f">{asset.name} | Mott {l_idx+1}-{r_idx+1}\n" + "\n".join(
@@ -233,20 +257,15 @@ def render_trace_asset(asset: TraceAsset) -> None:
                         st.button("Apply trim", on_click=_apply_many)
                 else:
                     st.info(
-                        "No Sample references this file yet. Add it to a Sample on the Samples page."
+                        "No Sample references this file yet. "
+                        "Add it to a Sample on the Samples page."
                     )
         else:
             st.caption("(No trimmed sequence available)")
 
-    # ---- Called sequence viewer (with trim highlights) ----
+    # ---- Called sequence viewer (with trim highlights + mini strip) ----
     st.divider()
     if seq:
-        # keep_range_0b uses the current (potentially recomputed) indices
-        keep_0b: Optional[Tuple[int, int]] = (
-            (l_idx, r_idx)
-            if (l_idx is not None and r_idx is not None and l_idx <= r_idx)
-            else None
-        )
         render_sequence_block(
             name=asset.name,
             sequence=seq,
@@ -254,8 +273,11 @@ def render_trace_asset(asset: TraceAsset) -> None:
             fasta_text=asset.to_fasta(),
             download_filename=f"{asset.name}.fasta",
             title="Sequence (called)",
-            colorize=False,  # plain code block
-            plotly_strip=False,  # hide the tiny Plotly strip
+            colorize=True,
+            color_bases=True,
+            keep_range_0b=keep_0b,
+            crosshatch_trim=True,
+            plotly_strip=True,
         )
     else:
         st.subheader("Sequence (called)")

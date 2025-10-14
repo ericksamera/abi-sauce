@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 import streamlit as st
 
 from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
-from abi_sauce.ui.controls import sample_selector
 from abi_sauce.ui.components import sample_editor
+from abi_sauce.ui.controls import sample_selector
 
 
 def samples_page():

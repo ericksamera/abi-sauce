@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Optional
 
 import streamlit as st
 
-from abi_sauce.services.sample_manager import SampleManager
-from abi_sauce.ui.controls import sample_selector
-from abi_sauce.services.alignment import pairwise_align, build_aligned_columns
+from abi_sauce.services.alignment import build_aligned_columns, pairwise_align
 from abi_sauce.services.alignment_waveforms import (
-    raw_channels_and_windows,
     build_aligned_waveforms,
+    raw_channels_and_windows,
 )
+from abi_sauce.services.sample_manager import SampleManager
 from abi_sauce.ui.alignment_plot import plot_aligned_traces
+from abi_sauce.ui.controls import sample_selector
 
 
 def _first_trace_asset(sample, assets_view):
@@ -29,7 +28,7 @@ def _first_trace_asset(sample, assets_view):
     return None
 
 
-def _sample_base_count(sample, assets_view) -> Optional[int]:
+def _sample_base_count(sample, assets_view) -> int | None:
     """Robust base count for caption: use the sample’s effective sequence."""
     seq = sample.effective_sequence(assets_view)
     return len(seq) if seq else None
@@ -38,7 +37,8 @@ def _sample_base_count(sample, assets_view) -> Optional[int]:
 def align_page():
     st.title("Pairwise alignment")
     st.caption(
-        "Chromatograms aligned by columns. Choose **Query** and **Reference**, pick settings, then click **Align** to run."
+        "Chromatograms aligned by columns. Choose **Query** and **Reference**, "
+        "pick settings, then click **Align** to run."
     )
 
     sm: SampleManager = st.session_state._samples
@@ -156,6 +156,18 @@ def align_page():
         s[ns + "row_h"] = int(row_h_in)
         s[ns + "has_run"] = bool(q_id and r_id)
 
+    # Quick utility to swap Q/R and re-run
+    c_swap = st.container()
+    with c_swap:
+        if s.get(ns + "q_id") and s.get(ns + "r_id"):
+
+            def _swap_qr():
+                s[ns + "q_id"], s[ns + "r_id"] = s[ns + "r_id"], s[ns + "q_id"]
+                s[ns + "has_run"] = True
+                st.rerun()
+
+            st.button("Swap Query ↔ Reference", on_click=_swap_qr)
+
     # If not aligned yet, stop here
     if not s[ns + "has_run"]:
         st.info(
@@ -203,7 +215,8 @@ def align_page():
 
     r0 = res[0]
     mid = "".join(
-        "|" if qa == rb and qa != "-" else " " for qa, rb in zip(r0.a_aln, r0.b_aln)
+        "|" if qa == rb and qa != "-" else " "
+        for qa, rb in zip(r0.a_aln, r0.b_aln, strict=False)
     )
     st.markdown(
         f"**Score:** {r0.score:.2f} • **Identity (query vs reference):** {100*r0.identity:.2f}%"
@@ -223,17 +236,31 @@ def align_page():
 
     # Cache waveform mapping by trace id + simple column signature + params
     @st.cache_data(show_spinner=False)
-    def _cols_sig(pairs: list[tuple[Optional[int], Optional[int]]]):
+    def _cols_sig(pairs: list[tuple[int | None, int | None]]):
+        """Cache key: derived signature of alignment columns.
+        Keys on (len(pairs), count gaps in Query, count gaps in Reference).
+        Invalidation: any change in column structure (new alignment) alters this signature.
+        """
         return (
             len(pairs),
-            sum(1 for iQ, iR in pairs if iQ is None),
-            sum(1 for iQ, iR in pairs if iR is None),
+            sum(1 for iQ, _ in pairs if iQ is None),
+            sum(1 for _, iR in pairs if iR is None),
         )
 
     @st.cache_data(show_spinner=False)
     def _cached_series(
-        trace_id: str, sig, windows, channels, for_query: bool, uniform: bool, spp: int
+        trace_id: str,
+        sig,
+        windows,
+        channels,
+        for_query: bool,
+        uniform: bool,
+        spp: int,
     ):
+        """Cache key: all arguments (Streamlit caches by value of args).
+        Invalidation: changing trace_id, sig (alignment), windows/channels (trace content),
+        for_query, uniform, or spp will invalidate and recompute.
+        """
         return build_aligned_waveforms(
             columns=cols,
             windows=windows,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 import streamlit as st
 
 from abi_sauce.models import Sample
@@ -20,11 +21,27 @@ def sample_editor(sample: Sample, fm: FileManager, sm: SampleManager) -> None:
         st.text_input("Name", key=name_key, label_visibility="visible")
     with colB:
 
-        def _rename():
+        def _rename() -> None:
             sm.rename(sample.id, st.session_state[name_key])
             st.toast("Renamed")
 
-        st.button("Rename", on_click=_rename)
+        st.button("Rename", on_click=_rename, use_container_width=True)
+
+    # --- Tags (lightweight editor) ---
+    with st.expander("Metadata", expanded=False):
+        tag_key = f"tags_{sample.id}"
+        if tag_key not in st.session_state:
+            st.session_state[tag_key] = ", ".join(sample.tags or [])
+        st.text_input("Tags (comma-separated)", key=tag_key)
+
+        def _save_tags() -> None:
+            tags = [
+                t.strip() for t in st.session_state[tag_key].split(",") if t.strip()
+            ]
+            sm.set_tags(sample.id, tags)
+            st.toast("Saved tags")
+
+        st.button("Save tags", on_click=_save_tags, use_container_width=True)
 
     # --- Primary asset selector (stateful + callback) ---
     if len(sample.asset_ids) > 1:
@@ -36,7 +53,7 @@ def sample_editor(sample: Sample, fm: FileManager, sm: SampleManager) -> None:
             else:
                 st.session_state[radio_key] = sample.asset_ids[0]
 
-        def _set_primary():
+        def _set_primary() -> None:
             sm.set_primary(sample.id, st.session_state[radio_key])
 
         st.radio(
@@ -61,11 +78,11 @@ def sample_editor(sample: Sample, fm: FileManager, sm: SampleManager) -> None:
     st.caption("Edits are stored on the sample; original file remains unchanged.")
     st.text_area("sequence", key=seq_key, height=150, label_visibility="collapsed")
 
-    def _save_seq():
+    def _save_seq() -> None:
         sm.set_sequence_override(sample.id, st.session_state[seq_key])
         st.toast("Saved sequence")
 
-    def _rc_seq():
+    def _rc_seq() -> None:
         s = st.session_state[seq_key]
         comp = str.maketrans("ACGTRYMKBDHVNacgtrymkbdhvn", "TGCAYRKMVHDBNtgcayrkmvhdbn")
         rc = s.translate(comp)[::-1]
@@ -75,9 +92,9 @@ def sample_editor(sample: Sample, fm: FileManager, sm: SampleManager) -> None:
 
     c3, c4, c5 = st.columns(3)
     with c3:
-        st.button("Save sequence", on_click=_save_seq)
+        st.button("Save sequence", on_click=_save_seq, use_container_width=True)
     with c4:
-        st.button("Reverse complement", on_click=_rc_seq)
+        st.button("Reverse complement", on_click=_rc_seq, use_container_width=True)
     with c5:
         fa = sm.fasta(sample.id)
         if fa:
@@ -95,6 +112,12 @@ def sample_editor(sample: Sample, fm: FileManager, sm: SampleManager) -> None:
     edited = st.data_editor(
         feats, num_rows="dynamic", width="stretch", key=f"fe_{sample.id}"
     )
-    if st.button("Save features"):
-        sm.set_feature_overrides(sample.id, edited)
-        st.toast("Saved features")
+    cfa, cfb = st.columns([1, 1])
+    with cfa:
+        if st.button("Save features", use_container_width=True):
+            sm.set_feature_overrides(sample.id, edited)
+            st.toast("Saved features")
+    with cfb:
+        if st.button("Reset to asset defaults", use_container_width=True):
+            sm.set_feature_overrides(sample.id, None)
+            st.toast("Reset to defaults")

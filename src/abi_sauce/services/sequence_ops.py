@@ -1,7 +1,8 @@
 # src/abi_sauce/services/sequence_ops.py
 from __future__ import annotations
+
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
 
 # Lightweight helpers; Biopython is optional here (import only when needed)
 
@@ -121,12 +122,12 @@ class ORF:
     prod: str
 
 
-def find_orfs(seq: str, *, min_aa: int = 30, table: int = 11) -> List[ORF]:
+def find_orfs(seq: str, *, min_aa: int = 30, table: int = 11) -> list[ORF]:
     """Simple ORF finder on + and - strands; returns AA-products."""
 
-    def _scan(s: str, base_frame: int, strand: int) -> List[ORF]:
+    def _scan(s: str, base_frame: int, strand: int) -> list[ORF]:
         aa = translate(s, frame=0, table=table, to_stop=False)
-        out: List[ORF] = []
+        out: list[ORF] = []
         start = 0
         for i, aa_c in enumerate(aa + "*"):
             if aa_c == "M" and start == 0:
@@ -165,7 +166,7 @@ def find_orfs(seq: str, *, min_aa: int = 30, table: int = 11) -> List[ORF]:
         return out
 
     s = seq or ""
-    outs: List[ORF] = []
+    outs: list[ORF] = []
     # forward
     for f in (0, 1, 2):
         outs.extend(_scan(s[f:], f, +1))
@@ -183,26 +184,26 @@ def find_orfs(seq: str, *, min_aa: int = 30, table: int = 11) -> List[ORF]:
 
 def find_motifs(
     seq: str, pattern: str, *, case_insensitive: bool = True
-) -> List[Tuple[int, int]]:
+) -> list[tuple[int, int]]:
     """Regex motif finder; returns 1-based (start,end) for each match."""
     import re
 
     flags = re.IGNORECASE if case_insensitive else 0
-    out: List[Tuple[int, int]] = []
+    out: list[tuple[int, int]] = []
     for m in re.finditer(pattern, seq or "", flags=flags):
         out.append((m.start() + 1, m.end()))
     return out
 
 
 def find_restriction_sites(
-    seq: str, enzyme_names: Optional[Iterable[str]] = None
-) -> Dict[str, List[int]]:
+    seq: str, enzyme_names: Iterable[str] | None = None
+) -> dict[str, list[int]]:
     """
     Find cut positions (1-based) for selected enzymes using Bio.Restriction.
     Returns {enzyme: [positions...]}.
     """
     try:
-        from Bio.Restriction import RestrictionBatch, AllEnzymes
+        from Bio.Restriction import AllEnzymes, RestrictionBatch
         from Bio.Seq import Seq
     except Exception:
         return {}

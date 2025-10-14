@@ -1,11 +1,13 @@
 from __future__ import annotations
+
 from io import StringIO
-from typing import List
+from typing import Any, Protocol
 from uuid import uuid4
 
 from Bio import SeqIO
 
-from abi_sauce.models import SequenceAsset, TraceAsset
+from abi_sauce.io.detect import FileKind
+from abi_sauce.models import AssetBase, SequenceAsset, TraceAsset
 from abi_sauce.services.feature_ops import feature_from_biopython, features_to_dicts
 
 
@@ -22,9 +24,9 @@ def _decode_text(raw: bytes) -> str:
 
 
 # ---------- FASTA ----------
-def read_fasta(name: str, raw: bytes, size: int, checksum: str) -> List[SequenceAsset]:
+def read_fasta(name: str, raw: bytes, size: int, checksum: str) -> list[SequenceAsset]:
     handle = StringIO(_decode_text(raw))
-    assets: List[SequenceAsset] = []
+    assets: list[SequenceAsset] = []
     for rec in SeqIO.parse(handle, "fasta"):
         assets.append(
             SequenceAsset(
@@ -44,10 +46,10 @@ def read_fasta(name: str, raw: bytes, size: int, checksum: str) -> List[Sequence
 # ---------- GenBank / ApE ----------
 def read_genbank_like(
     name: str, raw: bytes, size: int, checksum: str, ext_hint: str
-) -> List[SequenceAsset]:
+) -> list[SequenceAsset]:
     """Read GenBank (and ApE, which is GenBank-like) as sequences with features."""
     handle = StringIO(_decode_text(raw))
-    assets: List[SequenceAsset] = []
+    assets: list[SequenceAsset] = []
     for rec in SeqIO.parse(handle, "genbank"):
         # Convert to typed Feature, then to dicts (UI-friendly) for now.
         typed = [feature_from_biopython(f, len(rec.seq)) for f in rec.features]
@@ -70,7 +72,7 @@ def read_genbank_like(
 
 
 # ---------- AB1 ----------
-def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset]:
+def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> list[TraceAsset]:
     from abi_sauce.services.ab1 import parse_ab1
 
     channels, seq, quals, ploc, meta = parse_ab1(raw)
@@ -88,3 +90,24 @@ def read_ab1(name: str, raw: bytes, size: int, checksum: str) -> List[TraceAsset
         meta=meta,
     )
     return [asset]
+
+
+# ---------- Registry ----------
+class ReaderFn(Protocol):
+    def __call__(
+        self, name: str, raw: bytes, size: int, checksum: str, **kwargs: Any
+    ) -> list[AssetBase]: ...
+
+
+READERS: dict[FileKind, ReaderFn] = {
+    "fasta": read_fasta,
+    "ab1": read_ab1,
+    # genbank & ape share the same parser with an ext hint
+    "genbank": lambda name, raw, size, checksum, **_: read_genbank_like(
+        name, raw, size, checksum, ext_hint="gbk"
+    ),
+    "ape": lambda name, raw, size, checksum, **_: read_genbank_like(
+        name, raw, size, checksum, ext_hint="ape"
+    ),
+    # "unknown" intentionally omitted
+}

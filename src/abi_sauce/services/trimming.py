@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 # ------------------------------
 # Domain objects
@@ -30,7 +30,7 @@ class TrimResult:
 # ------------------------------
 
 
-def _mott_window(phred: List[int], cfg: TrimConfig) -> Tuple[int, int, float]:
+def _mott_window(phred: list[int], cfg: TrimConfig) -> tuple[int, int, float]:
     """Return (L, R, score) for the max-scoring subarray using Mott:
     score_i = cfg.error_limit - 10**(-Q/10)."""
     if not phred:
@@ -68,8 +68,8 @@ def _mott_window(phred: List[int], cfg: TrimConfig) -> Tuple[int, int, float]:
 
 
 def trim_with_mott(
-    sequence: str | None, phred: List[int] | None, cfg: TrimConfig
-) -> Optional[TrimResult]:
+    sequence: str | None, phred: list[int] | None, cfg: TrimConfig
+) -> TrimResult | None:
     """Typed API that returns a TrimResult or None."""
     if not sequence or not phred:
         return None
@@ -85,10 +85,10 @@ def trim_with_mott(
 
 
 def mott_trim_quals(
-    phred: List[int],
+    phred: list[int],
     error_limit: float = 0.05,
     min_len: int = 20,
-) -> Tuple[int, int, float]:
+) -> tuple[int, int, float]:
     cfg = TrimConfig(error_limit=error_limit, min_len=min_len)
     L, R, score = _mott_window(phred, cfg)
     return L, R, score
@@ -96,11 +96,11 @@ def mott_trim_quals(
 
 def trim_trace_asset_mott(
     sequence: str | None,
-    phred: List[int] | None,
+    phred: list[int] | None,
     *,
     error_limit: float = 0.05,
     min_len: int = 20,
-) -> Optional[Tuple[int, int, str]]:
+) -> tuple[int, int, str] | None:
     cfg = TrimConfig(error_limit=error_limit, min_len=min_len)
     res = trim_with_mott(sequence, phred, cfg)
     if not res:

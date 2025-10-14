@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import List, Optional
-from abi_sauce.models import TraceAsset, SequenceAsset
+
+from abi_sauce.models import SequenceAsset, TraceAsset
 
 
 def consensus_from_traces(
-    traces: List[TraceAsset], name: Optional[str] = None
+    traces: list[TraceAsset], name: str | None = None
 ) -> SequenceAsset:
     """
     Placeholder for future electropherogram alignment + consensus calling.

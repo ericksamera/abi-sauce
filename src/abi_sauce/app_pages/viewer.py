@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import streamlit as st
 
 from abi_sauce.services.file_manager import FileManager
-from abi_sauce.ui.controls import asset_selector
 from abi_sauce.ui.components import asset_detail
+from abi_sauce.ui.controls import asset_selector
 
 
 def viewer_page():

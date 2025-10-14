@@ -1,6 +1,8 @@
 from __future__ import annotations
-import streamlit as st
+
 from datetime import datetime
+
+import streamlit as st
 
 from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
@@ -36,5 +38,6 @@ def projects_page():
             )
             st.success(f"Imported {n_assets} assets and {n_samples} samples.")
             st.toast("Workspace imported")
+            st.rerun()
         except Exception as e:
             st.error(f"Import failed: {e}")

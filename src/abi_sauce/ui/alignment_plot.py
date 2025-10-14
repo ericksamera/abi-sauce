@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Dict, List, Optional, Sequence, Tuple
+
+from collections.abc import Sequence
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-BASE_COLORS: Dict[str, str] = {"A": "green", "C": "blue", "G": "black", "T": "red"}
-UNKNOWN_COLOR = "#888888"
+from abi_sauce.ui import theme
 
 
-def merge_gap_spans(columns: List[Tuple[Optional[int], Optional[int]]]):
+def merge_gap_spans(columns: list[tuple[int | None, int | None]]):
     """Compress consecutive gap columns into spans for shading."""
     spans, i, n = [], 0, len(columns)
     while i < n:
@@ -40,10 +41,7 @@ def letters_trace(gapped: str, ncols: int, row: int):
     if not gapped:
         return None
     xs = list(range(1, ncols + 1))
-    colors = [
-        BASE_COLORS.get(ch.upper(), UNKNOWN_COLOR) if ch != "-" else "rgba(0,0,0,0)"
-        for ch in gapped
-    ]
+    colors = [theme.base_color(ch) if ch != "-" else "rgba(0,0,0,0)" for ch in gapped]
     text = [ch if ch != "-" else "" for ch in gapped]
     y = [-0.10] * ncols  # slightly under baseline; don't clip
     return go.Scatter(
@@ -52,7 +50,7 @@ def letters_trace(gapped: str, ncols: int, row: int):
         mode="text",
         text=text,
         textposition="middle center",
-        textfont=dict(size=ninth_font_size(ncols), color=colors),
+        textfont={"size": theme.letter_font_size_by_columns(ncols), "color": colors},
         hoverinfo="skip",
         showlegend=False,
         name=f"row{row}-letters",
@@ -60,24 +58,13 @@ def letters_trace(gapped: str, ncols: int, row: int):
     )
 
 
-def ninth_font_size(ncols: int) -> int:
-    # Tiny helper to keep letters readable on dense alignments
-    if ncols <= 600:
-        return 9
-    if ncols <= 1200:
-        return 8
-    if ncols <= 1800:
-        return 7
-    return 6
-
-
 def _per_base_hover(
-    cols: List[Tuple[Optional[int], Optional[int]]],
-    wins: List[Tuple[int, int]],
-    ch: Dict[str, Sequence[float]],
+    cols: list[tuple[int | None, int | None]],
+    wins: list[tuple[int, int]],
+    ch: dict[str, Sequence[float]],
     gapped: str,
     is_A: bool,
-) -> tuple[List[float], List[float], List[str]]:
+) -> tuple[list[float], list[float], list[str]]:
     xs, ys, tt = [], [], []
     A, C, G, T = ch["A"], ch["C"], ch["G"], ch["T"]
 
@@ -120,17 +107,17 @@ def _per_base_hover(
 
 def plot_aligned_traces(
     *,
-    columns: List[Tuple[Optional[int], Optional[int]]],
-    a_series: Dict[str, Tuple[Sequence[float], Sequence[float]]],
+    columns: list[tuple[int | None, int | None]],
+    a_series: dict[str, tuple[Sequence[float], Sequence[float]]],
     a_label: str,
     a_gapped: str,
-    a_windows: List[Tuple[int, int]],
-    a_channels: Dict[str, Sequence[float]],
-    b_series: Dict[str, Tuple[Sequence[float], Sequence[float]]],
+    a_windows: list[tuple[int, int]],
+    a_channels: dict[str, Sequence[float]],
+    b_series: dict[str, tuple[Sequence[float], Sequence[float]]],
     b_label: str,
     b_gapped: str,
-    b_windows: List[Tuple[int, int]],
-    b_channels: Dict[str, Sequence[float]],
+    b_windows: list[tuple[int, int]],
+    b_channels: dict[str, Sequence[float]],
     letter_mode: str = "axis",  # "axis" | "overlay"
     force_svg: bool = False,
     show_rangeslider: bool = True,
@@ -171,7 +158,7 @@ def plot_aligned_traces(
                     x=xs,
                     y=ys,
                     mode="lines",
-                    line=dict(width=1.2, color=BASE_COLORS[base]),
+                    line={"width": 1.2, "color": theme.base_color(base)},
                     name=f"{legendgroup}: {base}",
                     legendgroup=legendgroup,
                     hoverinfo="skip",
@@ -185,9 +172,12 @@ def plot_aligned_traces(
     _add_row(b_series, 2, b_label)
 
     # Invisible per-base markers (hover text) placed at local maxima
-    invisible_marker = dict(
-        size=16, color="rgba(0,0,0,0)", line=dict(width=0), symbol="circle"
-    )
+    invisible_marker = {
+        "size": 16,
+        "color": "rgba(0,0,0,0)",
+        "line": {"width": 0},
+        "symbol": "circle",
+    }
     ax, ay, atxt = _per_base_hover(columns, a_windows, a_channels, a_gapped, is_A=True)
     bx, by, btxt = _per_base_hover(columns, b_windows, b_channels, b_gapped, is_A=False)
     fig.add_trace(
@@ -236,38 +226,39 @@ def plot_aligned_traces(
         showspikes=True,
         spikemode="across+toaxis",
         spikesnap="cursor",
-        spikethickness=2,
-        spikecolor="#444",
+        spikethickness=theme.HOVER_SPIKE_THICKNESS,
+        spikecolor=theme.HOVER_SPIKE_COLOR,
         spikedash="solid",
         row="all",
         col=1,
     )
 
-    # ✅ Letters on the axis (now for BOTH rows)
+    # Letters on the axis (for BOTH rows) or numeric fallback
     if letter_mode == "axis":
         max_dense = 2400  # guardrail for huge alignments
         if ncols <= max_dense:
             tickvals = list(range(1, ncols + 1))
             top_text = [ch if ch != "-" else "" for ch in a_gapped]
             bot_text = [ch if ch != "-" else "" for ch in b_gapped]
-            font = dict(size=ninth_font_size(ncols), color="#666")
-            common = dict(
-                showticklabels=True,
-                tickmode="array",
-                tickvals=tickvals,
-                tickangle=0,
-                ticks="",
-                tickfont=font,
-                automargin=True,
-            )
+            font = {
+                "size": theme.letter_font_size_by_columns(ncols),
+                "color": theme.MUTED_TEXT_COLOR,
+            }
+            common = {
+                "showticklabels": True,
+                "tickmode": "array",
+                "tickvals": tickvals,
+                "tickangle": 0,
+                "ticks": "",
+                "tickfont": font,
+                "automargin": True,
+            }
             fig.update_xaxes(row=1, col=1, ticktext=top_text, **common)
             fig.update_xaxes(row=2, col=1, ticktext=bot_text, **common)
         else:
-            # too many columns — degrade both rows to coarse numeric ticks
             fig.update_xaxes(tickmode="linear", dtick=10, row=1, col=1)
             fig.update_xaxes(tickmode="linear", dtick=10, row=2, col=1)
     else:
-        # overlay letters are drawn as text, so keep light numeric ticks on BOTH rows
         fig.update_xaxes(tickmode="linear", dtick=5, row=1, col=1)
         fig.update_xaxes(tickmode="linear", dtick=5, row=2, col=1)
 
@@ -297,15 +288,20 @@ def plot_aligned_traces(
     # Layout, rangeslider on the bottom shared x-axis
     fig.update_layout(
         height=max(220, int(row_height)) * 2 + 80,
-        margin=dict(l=60, r=28, t=54, b=42),
+        margin=theme.MARGIN_DEFAULT,
         hovermode="x",
         hoverdistance=-1,
         spikedistance=-1,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        legend=theme.LEGEND_DEFAULT,
         xaxis_title="Alignment column (includes gaps)",
         xaxis2_title="Alignment column (includes gaps)",
     )
     fig.update_xaxes(
-        rangeslider=dict(visible=bool(show_rangeslider), thickness=0.12), row=2, col=1
+        rangeslider={
+            "visible": bool(show_rangeslider),
+            "thickness": theme.RANGE_SLIDER_THICKNESS,
+        },
+        row=2,
+        col=1,
     )
     return fig

@@ -1,12 +1,13 @@
 # src/abi_sauce/services/ab1.py
 from __future__ import annotations
+
 from io import BytesIO
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
 
 from Bio import SeqIO
 
 
-def _moving_avg(xs: List[float], win: int = 5) -> List[float]:
+def _moving_avg(xs: list[float], win: int = 5) -> list[float]:
     """Simple moving average with small window; win should be odd."""
     n = len(xs)
     if n == 0 or win <= 1:
@@ -24,7 +25,7 @@ def _moving_avg(xs: List[float], win: int = 5) -> List[float]:
     return out
 
 
-def _composite_signal(channels: Dict[str, Optional[List[int]]]) -> List[float]:
+def _composite_signal(channels: dict[str, list[int] | None]) -> list[float]:
     """
     Build a composite intensity curve as the pointwise max across A/C/G/T.
     Handles channels of different lengths.
@@ -47,8 +48,8 @@ def _composite_signal(channels: Dict[str, Optional[List[int]]]) -> List[float]:
 
 
 def estimate_ploc(
-    channels: Dict[str, Optional[List[int]]], seq_len: Optional[int] = None
-) -> Optional[List[int]]:
+    channels: dict[str, list[int] | None], seq_len: int | None = None
+) -> list[int] | None:
     """
     Heuristic fallback to estimate base peak positions (PLOC) from the raw channels.
 
@@ -75,7 +76,7 @@ def estimate_ploc(
 
     # 3) find local maxima (>= right neighbor, > left) above threshold
     N = len(sm)
-    cands: List[int] = []
+    cands: list[int] = []
     for i in range(1, N - 1):
         if sm[i] > sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= thresh:
             cands.append(i)
@@ -90,7 +91,7 @@ def estimate_ploc(
         return cands
 
     # 4) bin the axis and choose best peak per bin (or local argmax if empty)
-    peaks: List[int] = []
+    peaks: list[int] = []
     for k in range(seq_len):
         start = (k * N) // seq_len
         end = ((k + 1) * N) // seq_len - 1
@@ -126,12 +127,12 @@ def estimate_ploc(
 
 def parse_ab1(
     raw: bytes,
-) -> Tuple[
-    Dict[str, Optional[List[int]]],  # channels
-    Optional[str],  # sequence
-    Optional[List[int]],  # qualities
-    Optional[List[int]],  # ploc (original or estimated)
-    Dict[str, Any],  # meta flags
+) -> tuple[
+    dict[str, list[int] | None],  # channels
+    str | None,  # sequence
+    list[int] | None,  # qualities
+    list[int] | None,  # ploc (original or estimated)
+    dict[str, Any],  # meta flags
 ]:
     """
     Parse AB1 bytes with Biopython, returning (channels, sequence, phred, ploc, meta).
@@ -147,7 +148,7 @@ def parse_ab1(
     handle = BytesIO(raw)
     rec = SeqIO.read(handle, "abi")  # may raise on invalid file
 
-    abif_raw: Dict[str, Any] = dict(rec.annotations.get("abif_raw", {}))
+    abif_raw: dict[str, Any] = dict(rec.annotations.get("abif_raw", {}))
 
     # Base order (FWO_ tag), e.g. "GATC" -> map onto DATA9..DATA12
     fwo = abif_raw.get("FWO_", b"GATC")
@@ -156,8 +157,8 @@ def parse_ab1(
     )
     data_keys = ["DATA9", "DATA10", "DATA11", "DATA12"]
 
-    channels: Dict[str, Optional[List[int]]] = {b: None for b in "ACGT"}
-    for base, key in zip(order, data_keys):
+    channels: dict[str, list[int] | None] = dict.fromkeys("ACGT")
+    for base, key in zip(order, data_keys, strict=False):
         arr = abif_raw.get(key)
         if arr is None:
             continue
@@ -169,7 +170,7 @@ def parse_ab1(
     seq = str(rec.seq) if getattr(rec, "seq", None) else None
 
     # Qualities (prefer Biopython letter_annotations; fallback to PCON2)
-    quals: Optional[List[int]] = None
+    quals: list[int] | None = None
     if hasattr(rec, "letter_annotations") and "phred_quality" in rec.letter_annotations:
         try:
             quals = list(map(int, rec.letter_annotations["phred_quality"]))
@@ -185,7 +186,7 @@ def parse_ab1(
 
     # Base positions (PLOC2) or estimate if missing
     had_ploc2 = "PLOC2" in abif_raw
-    ploc: Optional[List[int]] = None
+    ploc: list[int] | None = None
     if had_ploc2:
         try:
             ploc = list(map(int, abif_raw["PLOC2"]))

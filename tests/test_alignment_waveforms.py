@@ -1,4 +1,5 @@
 from math import isnan
+
 from abi_sauce.services.alignment_waveforms import build_aligned_waveforms
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple
+from typing import Literal
+
 from Bio.Align import PairwiseAligner
 
 # Keep the same external mode names for your UI.
@@ -23,7 +25,7 @@ def _build_gapped_from_alignment(aln, seqA: str, seqB: str) -> tuple[str, str]:
     b_blocks = aln.aligned[1]
     outA, outB = [], []
     ia = ib = 0
-    for (sa, ea), (sb, eb) in zip(a_blocks, b_blocks):
+    for (sa, ea), (sb, eb) in zip(a_blocks, b_blocks, strict=False):
         # gaps before the next aligned block
         if ia < sa:
             outA.append(seqA[ia:sa])  # insertion in A
@@ -46,7 +48,9 @@ def _build_gapped_from_alignment(aln, seqA: str, seqB: str) -> tuple[str, str]:
 
 
 def _identity(a_aln: str, b_aln: str) -> float:
-    pairs = [(a, b) for a, b in zip(a_aln, b_aln) if a != "-" and b != "-"]
+    pairs = [
+        (a, b) for a, b in zip(a_aln, b_aln, strict=False) if a != "-" and b != "-"
+    ]
     if not pairs:
         return 0.0
     return sum(1 for a, b in pairs if a == b) / len(pairs)
@@ -61,7 +65,7 @@ def pairwise_align(
     gap_open: float = -10.0,
     gap_extend: float = -0.5,
     top_n: int = 1,
-) -> List[PairwiseResult]:
+) -> list[PairwiseResult]:
     aligner = PairwiseAligner()
     aligner.mode = "local" if mode.startswith("local") else "global"
 
@@ -77,8 +81,8 @@ def pairwise_align(
         aligner.open_gap_score = gap_open
         aligner.extend_gap_score = gap_extend
 
-    results: List[PairwiseResult] = []
-    for i, aln in enumerate(aligner.align(seqA, seqB)):
+    results: list[PairwiseResult] = []
+    for _i, aln in enumerate(aligner.align(seqA, seqB)):
         a_aln, b_aln = _build_gapped_from_alignment(aln, seqA, seqB)
         # start/end based on A's aligned coords (best-effort for display)
         start = aln.aligned[0][0][0] if len(aln.aligned[0]) else 0
@@ -110,16 +114,16 @@ class AlignedColumns:
                   (or None for a gap), and iB likewise for seqB.
     """
 
-    columns: List[Tuple[Optional[int], Optional[int]]]
+    columns: list[tuple[int | None, int | None]]
 
 
 def build_aligned_columns(a_aln: str, b_aln: str) -> AlignedColumns:
     """
     Convert gapped strings into explicit columns of (iA|None, iB|None).
     """
-    cols: List[Tuple[Optional[int], Optional[int]]] = []
+    cols: list[tuple[int | None, int | None]] = []
     ia = ib = 0  # indices into ungapped A/B
-    for ca, cb in zip(a_aln, b_aln):
+    for ca, cb in zip(a_aln, b_aln, strict=False):
         idxA = ia if ca != "-" else None
         idxB = ib if cb != "-" else None
         cols.append((idxA, idxB))

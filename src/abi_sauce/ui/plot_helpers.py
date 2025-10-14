@@ -1,12 +1,16 @@
 # src/abi_sauce/ui/plot_helpers.py
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Literal, Mapping, Sequence, Union
+from typing import Literal
+
 import plotly.graph_objects as go
 
 from abi_sauce.services import trace_processing as tp
+from abi_sauce.ui import theme
 
-Number = Union[int, float]
+Number = int | float
 
 # --- Plotly/Pandas compatibility shim (handles partially-initialized pandas) ---
 try:
@@ -17,9 +21,6 @@ try:
         _bv.pd = None
 except Exception:
     pass
-
-# ---- Color scheme -------------------------------------------------------------
-BASE_COLORS: Dict[str, str] = {"A": "green", "T": "red", "C": "blue", "G": "black"}
 
 
 # ---- small utils --------------------------------------------------------------
@@ -52,7 +53,7 @@ def _to_simple_list(seq):
 
 def _decimate_max_bins_xy(
     xs: Sequence[Number], ys: Sequence[Number], target_points: int
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     xs = _to_simple_list(xs) or []
     ys = _to_simple_list(ys) or []
     n = min(len(xs), len(ys))
@@ -103,7 +104,7 @@ def _add_slider_overview_trace(
     *,
     target_points: int = 3000,
     name: str = "overview",
-    color: Optional[str] = None,
+    color: str | None = None,
 ) -> None:
     dx, dy = _decimate_max_bins_xy(xs, ys, target_points)
     fig.add_trace(
@@ -116,7 +117,7 @@ def _add_slider_overview_trace(
             showlegend=False,
             xaxis="x",
             yaxis="y",
-            line=dict(width=1, color=color),
+            line={"width": 1, "color": color},
             opacity=0.25,
         )
     )
@@ -128,8 +129,8 @@ def _add_hatched_band(
     x0: float,
     x1: float,
     yref: str = "paper",
-    base_alpha: float = 0.15,
-    stripe_alpha: float = 0.3,
+    base_alpha: float = theme.HATCH_BASE_ALPHA,
+    stripe_alpha: float = theme.HATCH_STRIPE_ALPHA,
     max_lines: int = 300,
     stripe_layer: str = "above",
 ) -> None:
@@ -160,7 +161,7 @@ def _add_hatched_band(
             y1=1,
             xref="x",
             yref=yref,
-            line=dict(width=1, color=f"rgba(120,120,120,{stripe_alpha})"),
+            line={"width": 1, "color": f"rgba(120,120,120,{stripe_alpha})"},
             layer=stripe_layer,
         )
         cur += step
@@ -169,7 +170,7 @@ def _add_hatched_band(
 # ---- helpers for peak/hover text ---------------------------------------------
 def _dominant_base_at_peak(
     p: int, channels: Mapping[str, Sequence[Number]], window: int = 2
-) -> Optional[str]:
+) -> str | None:
     best_base, best_val = None, float("-inf")
     for b in "ACGT":
         arr = channels.get(b) or []
@@ -187,9 +188,9 @@ def _dominant_base_at_peak(
 
 
 def _peak_heights_samples(
-    ploc: List[int], channels: Mapping[str, Sequence[Number]], window: int = 2
-) -> List[float]:
-    heights: List[float] = []
+    ploc: list[int], channels: Mapping[str, Sequence[Number]], window: int = 2
+) -> list[float]:
+    heights: list[float] = []
     for p in ploc:
         best: float = 0.0
         for arr in channels.values():
@@ -204,13 +205,13 @@ def _peak_heights_samples(
 
 
 def _peak_hover_texts(
-    ploc: List[int],
+    ploc: list[int],
     seq_len: int,
-    seq: Optional[str],
+    seq: str | None,
     channels: Mapping[str, Sequence[Number]],
-    quals: Optional[Sequence[Number]],
-) -> List[str]:
-    texts: List[str] = []
+    quals: Sequence[Number] | None,
+) -> list[str]:
+    texts: list[str] = []
     for i in range(seq_len):
         p = ploc[i] if i < len(ploc) else (ploc[-1] if ploc else 0)
         peak_base = _dominant_base_at_peak(p, channels, window=2)
@@ -234,10 +235,10 @@ def _peak_hover_texts(
 @dataclass
 class TraceData:
     channels: Mapping[str, Sequence[Number]]
-    ploc: List[int]
+    ploc: list[int]
     seq_len: int
-    quals: Optional[Sequence[Number]] = None
-    seq: Optional[str] = None
+    quals: Sequence[Number] | None = None
+    seq: str | None = None
 
 
 @dataclass
@@ -245,7 +246,7 @@ class TracePlotConfig:
     mode: Literal["samples", "bases"] = "samples"
     resample_method: Literal["max", "mean", "median"] = "max"
     show_trim: bool = True
-    trim_range: Optional[Tuple[int, int]] = None  # 1-based inclusive
+    trim_range: tuple[int, int] | None = None  # 1-based inclusive
     uirevision: str = "chrom_trim_base_ticks_v1"
     height: int = 340
     show_grid: bool = True
@@ -254,11 +255,11 @@ class TracePlotConfig:
     initial_base_span: int = 20
     base_tick_every: int = 10
     # NEW: control range application
-    x_range: Optional[Tuple[float, float]] = None
+    x_range: tuple[float, float] | None = None
     use_initial_range: bool = False
 
 
-def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> Dict[str, object]:
+def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> dict[str, object]:
     channels = data.channels
     ploc = list(data.ploc or [])
     seq_len = int(data.seq_len if data.seq_len is not None else len(ploc))
@@ -277,14 +278,14 @@ def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> Dict[str, obj
     y_max = float(max_signal) * 1.08 if max_signal > 0 else 1.0
     peak_htexts = _peak_hover_texts(ploc, seq_len, seq, channels, quals)
 
-    out: Dict[str, object] = dict(
-        seq_len=seq_len,
-        total_samples=total_samples,
-        windows=windows,
-        y_max=y_max,
-        peak_htexts=peak_htexts,
-        quals=None,
-    )
+    out: dict[str, object] = {
+        "seq_len": seq_len,
+        "total_samples": total_samples,
+        "windows": windows,
+        "y_max": y_max,
+        "peak_htexts": peak_htexts,
+        "quals": None,
+    }
 
     if quals is not None:
         q_list = list(quals)
@@ -310,15 +311,15 @@ def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> Dict[str, obj
             sppb = total_samples / max(seq_len, 1)
             tickvals = [int(round(b * sppb)) for b in tick_bases]
         out.update(
-            dict(
-                xs_samples=xs,
-                peak_ys=peak_ys,
-                initial_x_range=[x0, x1],
-                tickvals=tickvals,
-                ticktext=[str(b) for b in tick_bases],
-                q_centers=[(s + e) / 2.0 for (s, e) in windows][:seq_len],
-                q_widths=[(e - s + 1) for (s, e) in windows][:seq_len],
-            )
+            {
+                "xs_samples": xs,
+                "peak_ys": peak_ys,
+                "initial_x_range": [x0, x1],
+                "tickvals": tickvals,
+                "ticktext": [str(b) for b in tick_bases],
+                "q_centers": [(s + e) / 2.0 for (s, e) in windows][:seq_len],
+                "q_widths": [(e - s + 1) for (s, e) in windows][:seq_len],
+            }
         )
     else:
         xs = list(range(1, seq_len + 1))
@@ -339,19 +340,19 @@ def prepare_trace_layers(data: TraceData, cfg: TracePlotConfig) -> Dict[str, obj
             resampled = {k: [0.0] * seq_len for k in "ACGT"}
             peak_ys = [0.0] * seq_len
         out.update(
-            dict(
-                xs_bases=xs,
-                resampled=resampled,
-                peak_ys=peak_ys,
-                initial_x_range=[0.5, base_span + 0.5],
-            )
+            {
+                "xs_bases": xs,
+                "resampled": resampled,
+                "peak_ys": peak_ys,
+                "initial_x_range": [0.5, base_span + 0.5],
+            }
         )
 
     return out
 
 
 def render_trace_layers(
-    data: TraceData, cfg: TracePlotConfig, layers: Dict[str, object]
+    data: TraceData, cfg: TracePlotConfig, layers: dict[str, object]
 ) -> go.Figure:
     """
     IMPORTANT: we only set x-axis 'range' when cfg.x_range is provided OR
@@ -362,19 +363,22 @@ def render_trace_layers(
 
     channel_hoverinfo = "skip" if cfg.peak_only_hover else "x+y+name"
     bar_hoverinfo = "skip" if cfg.peak_only_hover else "x+y"
-    invisible_marker = dict(
-        size=16, color="rgba(0,0,0,0)", line=dict(width=0), symbol="circle"
-    )
+    invisible_marker = {
+        "size": 16,
+        "color": "rgba(0,0,0,0)",
+        "line": {"width": 0},
+        "symbol": "circle",
+    }
 
     # Layout
     fig.update_layout(
         height=cfg.height,
         uirevision=cfg.uirevision,
         dragmode="pan",
-        margin=dict(l=40, r=40, t=40, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=theme.MARGIN_DEFAULT,
+        legend=theme.LEGEND_DEFAULT,
         hovermode="closest",
-        modebar=dict(remove=["lasso2d", "select2d"]),
+        modebar={"remove": ["lasso2d", "select2d"]},
     )
 
     # PHRED bars
@@ -387,7 +391,7 @@ def render_trace_layers(
                 q[: len(layers["q_centers"])],
                 name="quality",
                 width=layers["q_widths"],
-                marker=dict(opacity=0.18),
+                marker={"opacity": theme.QUALITY_BAR_OPACITY},
                 yaxis="y2",
                 hoverinfo=bar_hoverinfo,
                 showlegend=True,
@@ -399,7 +403,7 @@ def render_trace_layers(
                 q,
                 name="quality",
                 width=0.98,
-                marker=dict(opacity=0.18),
+                marker={"opacity": theme.QUALITY_BAR_OPACITY},
                 yaxis="y2",
                 hoverinfo=bar_hoverinfo,
                 showlegend=True,
@@ -433,7 +437,7 @@ def render_trace_layers(
                     arr or [],
                     target_points=3000,
                     name=f"{base_letter} overview",
-                    color=BASE_COLORS.get(base_letter),
+                    color=theme.base_color(base_letter),
                 )
         else:
             xs_over = layers["xs_bases"]
@@ -445,7 +449,7 @@ def render_trace_layers(
                     resampled.get(base_letter, []),
                     target_points=2000,
                     name=f"{base_letter} overview",
-                    color=BASE_COLORS.get(base_letter),
+                    color=theme.base_color(base_letter),
                 )
 
     # Main lines + invisible peak markers
@@ -464,8 +468,8 @@ def render_trace_layers(
                     if cfg.peak_only_hover
                     else "%{y}<extra>%{fullData.name}</extra>"
                 ),
-                line=dict(width=1.5, color=BASE_COLORS.get(base_letter)),
-                opacity=0.95,
+                line={"width": 1.5, "color": theme.base_color(base_letter)},
+                opacity=theme.WAVE_OPACITY,
             )
         fig.add_trace(
             go.Scatter(
@@ -480,9 +484,12 @@ def render_trace_layers(
             )
         )
         xaxis_title = "Sample index (base ticks shown below)"
-        xaxis_tick_kwargs = dict(
-            tickmode="array", tickvals=layers["tickvals"], ticktext=layers["ticktext"]
-        )
+        xaxis_tick_kwargs = {
+            "tickmode": "linear",
+            "dtick": max(1, int(cfg.base_tick_every)),
+            "tick0": cfg.base_tick_every,
+        }
+
     else:
         xs_main = layers["xs_bases"]
         resampled = layers["resampled"]
@@ -499,7 +506,7 @@ def render_trace_layers(
                     if cfg.peak_only_hover
                     else "%{y}<extra>%{fullData.name}</extra>"
                 ),
-                line=dict(width=1.5, color=BASE_COLORS.get(base_letter)),
+                line={"width": 1.5, "color": theme.base_color(base_letter)},
             )
         fig.add_trace(
             go.Scatter(
@@ -514,14 +521,14 @@ def render_trace_layers(
             )
         )
         xaxis_title = "Base number"
-        xaxis_tick_kwargs = dict(
-            tickmode="linear",
-            dtick=max(1, int(cfg.base_tick_every)),
-            tick0=cfg.base_tick_every,
-        )
+        xaxis_tick_kwargs = {
+            "tickmode": "linear",
+            "dtick": max(1, int(cfg.base_tick_every)),
+            "tick0": cfg.base_tick_every,
+        }
 
     # Axes — apply range only when requested
-    x_range_to_apply: Optional[Tuple[float, float]] = None
+    x_range_to_apply: tuple[float, float] | None = None
     if cfg.x_range is not None:
         x_range_to_apply = cfg.x_range
     elif cfg.use_initial_range:
@@ -534,7 +541,10 @@ def render_trace_layers(
         showgrid=False,
         zeroline=False,
         showticklabels=True,
-        rangeslider=dict(visible=cfg.show_rangeslider, thickness=0.12),
+        rangeslider={
+            "visible": cfg.show_rangeslider,
+            "thickness": theme.RANGE_SLIDER_THICKNESS,
+        },
         **xaxis_tick_kwargs,
     )
     fig.update_yaxes(
@@ -547,13 +557,13 @@ def render_trace_layers(
     if layers.get("quals") is not None:
         qmax = max(layers["quals"]) if layers["quals"] else 1
         fig.update_layout(
-            yaxis2=dict(
-                title="PHRED",
-                overlaying="y",
-                side="right",
-                range=[0, max(1, float(qmax) * 1.05)],
-                showgrid=False,
-            )
+            yaxis2={
+                "title": "PHRED",
+                "overlaying": "y",
+                "side": "right",
+                "range": [0, max(1, float(qmax) * 1.05)],
+                "showgrid": False,
+            },
         )
 
     return fig
@@ -562,14 +572,14 @@ def render_trace_layers(
 # ---- Back-compat wrapper ------------------------------------------------------
 def build_trace_fig(
     channels: Mapping[str, Sequence[Number]],
-    ploc: List[int],
-    seq_len: Optional[int] = None,
-    quals: Optional[Sequence[Number]] = None,
-    seq: Optional[str] = None,
+    ploc: list[int],
+    seq_len: int | None = None,
+    quals: Sequence[Number] | None = None,
+    seq: str | None = None,
     mode: Literal["samples", "bases"] = "samples",
     resample_method: Literal["max", "mean", "median"] = "max",
     show_trim: bool = True,
-    trim_range: Optional[Tuple[int, int]] = None,
+    trim_range: tuple[int, int] | None = None,
     uirevision: str = "chrom_trim_base_ticks_v1",
     height: int = 340,
     show_grid: bool = True,
@@ -578,7 +588,7 @@ def build_trace_fig(
     *,
     initial_base_span: int = 20,
     base_tick_every: int = 10,
-    x_range: Optional[Tuple[float, float]] = None,
+    x_range: tuple[float, float] | None = None,
     use_initial_range: bool = False,
 ) -> go.Figure:
     data = TraceData(

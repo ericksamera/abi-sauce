@@ -1,14 +1,17 @@
 # src/abi_sauce/models.py
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
+from typing import Any
+
+from abi_sauce.types import BaseChar
 
 
 class AssetKind(str, Enum):
-    SEQUENCE = "sequence"  # e.g., FASTA/GenBank/ApE
-    TRACE = "trace"  # e.g., AB1 (Sanger chromatogram)
+    SEQUENCE = "sequence"
+    TRACE = "trace"
 
 
 @dataclass
@@ -18,51 +21,48 @@ class AssetBase:
     ext: str
     size: int
     checksum_md5: str
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc), init=False
-    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     kind: AssetKind = field(init=False)
+
+    def touch(self) -> None:
+        self.updated_at = datetime.now(UTC)
 
 
 @dataclass
 class SequenceAsset(AssetBase):
-    sequence: str  # plain sequence (A/C/G/T, possibly N)
+    sequence: str
     description: str = ""
     length: int = 0
-    meta: Dict[str, Any] = field(default_factory=dict)  # e.g., source, locus, etc.
-    features: List[Dict[str, Any]] = field(
-        default_factory=list
-    )  # simplified feature dicts
+    meta: dict[str, Any] = field(default_factory=dict)
+    features: list[dict[str, Any]] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.kind = AssetKind.SEQUENCE
         if not self.length:
             self.length = len(self.sequence)
 
-    def to_fasta(self, header: Optional[str] = None) -> str:
+    def to_fasta(self, header: str | None = None) -> str:
         hdr = header or (self.description or self.name)
         seq = self.sequence
-        # wrap 70-chars per FASTA convention
         wrapped = "\n".join(seq[i : i + 70] for i in range(0, len(seq), 70))
         return f">{hdr}\n{wrapped}\n"
 
 
 @dataclass
 class TraceAsset(AssetBase):
-    sequence: Optional[str] = None
-    qualities: Optional[List[int]] = None  # per-base PHRED, if present
-    base_positions: Optional[List[int]] = None  # peak indices (PLOC2), if present
-    channels: Dict[str, Optional[List[int]]] = field(
+    sequence: str | None = None
+    qualities: list[int] | None = None  # per-base PHRED, if present
+    base_positions: list[int] | None = None  # PLOC2 (peak indices), if present
+    channels: dict[BaseChar, list[int] | None] = field(
         default_factory=lambda: {"A": None, "C": None, "G": None, "T": None}
     )
-    meta: Dict[str, Any] = field(
-        default_factory=dict
-    )  # e.g., instrument, run date, ABI tags subset
+    meta: dict[str, Any] = field(default_factory=dict)  # subset of ABIF tags, etc.
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.kind = AssetKind.TRACE
 
-    def to_fasta(self, header: Optional[str] = None) -> Optional[str]:
+    def to_fasta(self, header: str | None = None) -> str | None:
         if not self.sequence:
             return None
         hdr = header or self.name
@@ -76,24 +76,17 @@ class TraceAsset(AssetBase):
 class Sample:
     id: str
     name: str
-    asset_ids: List[str] = field(default_factory=list)
+    asset_ids: list[str] = field(default_factory=list)
     description: str = ""
-    tags: List[str] = field(default_factory=list)
-    primary_asset_id: Optional[str] = None
+    tags: list[str] = field(default_factory=list)
+    primary_asset_id: str | None = None
+    sequence_override: str | None = None
+    feature_overrides: list[dict[str, Any]] | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    # user edits (do not mutate original assets)
-    sequence_override: Optional[str] = None
-    feature_overrides: Optional[List[Dict[str, Any]]] = None
-
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc), init=False
-    )
-
-    # helpers (these do not persist assets; managers should pass in assets as a dict)
-    def effective_sequence(self, assets: Dict[str, AssetBase]) -> Optional[str]:
+    def effective_sequence(self, assets: dict[str, AssetBase]) -> str | None:
         if self.sequence_override:
             return self.sequence_override
-        # choose primary, else first sequence-like thing with bases
         cand_id = self.primary_asset_id or next(
             (aid for aid in self.asset_ids if aid in assets), None
         )
@@ -103,23 +96,24 @@ class Sample:
         if isinstance(a, SequenceAsset):
             return a.sequence
         if isinstance(a, TraceAsset):
-            return a.sequence
+            return a.sequence or None
         return None
 
-    def effective_features(self, assets: Dict[str, AssetBase]) -> List[Dict[str, Any]]:
+    def effective_features(self, assets: dict[str, AssetBase]) -> list[dict[str, Any]]:
         if self.feature_overrides is not None:
             return self.feature_overrides
         cand_id = self.primary_asset_id or next(
             (aid for aid in self.asset_ids if aid in assets), None
         )
-        a = assets.get(cand_id)
+        a = assets.get(cand_id) if cand_id else None
         if isinstance(a, SequenceAsset) and a.features:
             return a.features
         return []
 
-    def to_fasta(self, assets: Dict[str, AssetBase]) -> Optional[str]:
+    def to_fasta(self, assets: dict[str, AssetBase]) -> str | None:
         seq = self.effective_sequence(assets)
         if not seq:
             return None
+        hdr = self.name
         wrapped = "\n".join(seq[i : i + 70] for i in range(0, len(seq), 70))
-        return f">{self.name}\n{wrapped}\n"
+        return f">{hdr}\n{wrapped}\n"

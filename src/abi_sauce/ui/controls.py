@@ -1,6 +1,8 @@
 # src/abi_sauce/ui/controls.py
 from __future__ import annotations
-from typing import Iterable, Optional, Sequence
+
+from collections.abc import Iterable, Sequence
+
 import streamlit as st
 
 from abi_sauce.models import AssetBase, SequenceAsset, TraceAsset
@@ -13,9 +15,9 @@ def asset_selector(
     *,
     label: str = "File",
     kinds: Sequence[str] = ("Sequences", "Traces"),
-    default_id: Optional[str] = None,
+    default_id: str | None = None,
     sidebar: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """Unified asset picker with type filter + search."""
     assets = fm.list()
     if not assets:
@@ -78,10 +80,10 @@ def sample_selector(
     *,
     label: str = "Sample",
     exclude: Iterable[str] = (),
-    default_id: Optional[str] = None,
+    default_id: str | None = None,
     sidebar: bool = False,
     input_type: str = "radio",  # "radio" | "selectbox"
-) -> Optional[str]:
+) -> str | None:
     """Unified sample picker. Set input_type='selectbox' for a dropdown."""
     samples = [s for s in sm.list() if s.id not in set(exclude)]
     if not samples:

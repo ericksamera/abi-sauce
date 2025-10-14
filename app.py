@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import streamlit as st
 
+from abi_sauce.app_pages.align import align_page
+from abi_sauce.app_pages.projects import projects_page
+from abi_sauce.app_pages.samples import samples_page
+from abi_sauce.app_pages.uploads import uploads_page
+from abi_sauce.app_pages.viewer import viewer_page
 from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
-
-from abi_sauce.app_pages.uploads import uploads_page
-from abi_sauce.app_pages.samples import samples_page
-from abi_sauce.app_pages.align import align_page
-from abi_sauce.app_pages.viewer import viewer_page
-from abi_sauce.app_pages.projects import projects_page
 
 st.set_page_config(page_title="abi-sauce", layout="wide")
 

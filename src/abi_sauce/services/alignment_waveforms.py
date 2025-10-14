@@ -1,157 +1,159 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Dict, List, Optional, Sequence, Tuple
+
+from collections.abc import Sequence
 
 from abi_sauce.models import TraceAsset
 from abi_sauce.services.trace_processing import compute_base_windows
+from abi_sauce.types import BaseChar
 
-NAN = float("nan")
+NAN: float = float("nan")
+
+
+def _to_float_list(seq: Sequence[float] | Sequence[int] | None) -> list[float]:
+    if not seq:
+        return []
+    return [float(x) for x in seq]
 
 
 def raw_channels_and_windows(
     trace_asset: TraceAsset,
 ) -> tuple[
-    Dict[str, List[float]], List[Tuple[int, int]], int, str, Optional[List[int]]
+    dict[BaseChar, list[float]], list[tuple[int, int]], int, str, list[int] | None
 ]:
     """
-    Returns (channels, windows, seq_len, seq_upper, quals_or_none).
-      - channels: dict A/C/G/T -> list[float]
-      - windows: per-base inclusive (L, R) sample windows
-      - seq_len: number of bases (from called seq if present, else len(ploc))
-      - seq_upper: uppercase called sequence ("" if none)
-      - quals_or_none: PHRED per base if present (len == seq_len)
+    Prepare float channel arrays and base windows for a TraceAsset.
+
+    Returns:
+      channels: per-base-letter float arrays
+      windows: inclusive sample windows per base (via PLOC midpoint partitioning)
+      total_samples: length of the raw trace vectors
+      abif_order: the ABI-reported channel order (if known)
+      ploc: raw PLOC list (peak sample indices) if present
     """
-    seq_upper = (trace_asset.sequence or "").upper()
+    ch_raw = trace_asset.channels or {}
+    A = _to_float_list(ch_raw.get("A"))
+    C = _to_float_list(ch_raw.get("C"))
+    G = _to_float_list(ch_raw.get("G"))
+    T = _to_float_list(ch_raw.get("T"))
+    channels: dict[BaseChar, list[float]] = {"A": A, "C": C, "G": G, "T": T}
+
+    total_samples = max((len(A), len(C), len(G), len(T)), default=0)
     ploc = list(trace_asset.base_positions or [])
-    channels = {b: list(trace_asset.channels.get(b) or []) for b in "ACGT"}
-    quals = (
-        list(trace_asset.qualities or []) if trace_asset.qualities is not None else None
-    )
+    abif_order = str((trace_asset.meta or {}).get("abif_order", "ACGT"))
 
-    total_samples = max((len(v) for v in channels.values() if v), default=0)
-    seq_len = len(seq_upper) if seq_upper else (len(ploc) or 0)
-    if seq_len == 0:
-        return {b: [] for b in "ACGT"}, [], 0, "", None
+    windows: list[tuple[int, int]] = []
+    if ploc and total_samples:
+        windows = compute_base_windows(ploc, total_samples)
 
-    # Normalize PLOC length to seq_len
-    if len(ploc) < seq_len:
-        last = (total_samples - 1) if total_samples else 0
-        ploc = (ploc[:] + [last] * (seq_len - len(ploc)))[:seq_len]
-    elif len(ploc) > seq_len:
-        ploc = ploc[:seq_len]
-
-    windows = compute_base_windows(ploc, total_samples)
-
-    if quals is not None:
-        if len(quals) < seq_len:
-            quals = quals + [0] * (seq_len - len(quals))
-        elif len(quals) > seq_len:
-            quals = quals[:seq_len]
-
-    return channels, windows, seq_len, seq_upper, quals
+    return channels, windows, total_samples, abif_order, (ploc or None)
 
 
-def _map_window_to_column_x(k: int, npts: int) -> List[float]:
-    """Map npts samples for alignment column k into [k-0.5, k+0.5], >=2 points."""
-    if npts <= 1:
-        return [k - 0.5, k + 0.5]
-    start = k - 0.5
-    step = 1.0 / (npts - 1)
-    return [start + j * step for j in range(npts)]
-
-
-def _resample_linear(segment: Sequence[float], n_points: int) -> List[float]:
-    """Linear resample to exactly n_points (duplicate if singleton)."""
-    m = len(segment)
+def _linspace(n_points: int, start: float, end: float) -> list[float]:
+    """Inclusive linspace-like helper that always returns at least 2 points."""
     if n_points <= 1:
-        v = float(segment[0] if segment else 0.0)
-        return [v, v]
-    if m <= 1:
-        v = float(segment[0] if segment else 0.0)
-        return [v] * max(2, n_points)
-    out: List[float] = []
-    for j in range(n_points):
-        t = j * (m - 1) / (n_points - 1)
-        i0 = int(t)
-        i1 = min(i0 + 1, m - 1)
-        frac = t - i0
-        out.append((1.0 - frac) * float(segment[i0]) + frac * float(segment[i1]))
-    if len(out) == 1:
-        out.append(out[0])
-    return out
+        return [start, end]
+    step = (end - start) / float(n_points - 1)
+    return [start + i * step for i in range(n_points)]
+
+
+def _segment_max(values: Sequence[float]) -> float:
+    mv = 0.0
+    for v in values:
+        fv = float(v)
+        if fv > mv:
+            mv = fv
+    return mv
 
 
 def build_aligned_waveforms(
-    columns: List[Tuple[Optional[int], Optional[int]]],
-    windows: List[Tuple[int, int]],
-    channels: Dict[str, Sequence[float]],
-    for_A: bool,
     *,
+    columns: list[tuple[int | None, int | None]],
+    windows: list[tuple[int, int]],
+    channels: dict[BaseChar, Sequence[float]],
+    for_A: bool,
     uniform_samples_per_base: bool = True,
     samples_per_base: int = 21,
-) -> tuple[Dict[str, Tuple[List[float], List[float]]], List[float]]:
+) -> tuple[dict[BaseChar, tuple[list[float], list[float]]], list[float]]:
     """
-    Build per-row waveforms mapped into equidistant alignment columns.
+    Map raw sample-space channels into alignment-column space.
 
     Returns (series, peak_y):
       - series: {base: (xs, ys)} with NaN separators between columns (Scattergl-friendly)
       - peak_y: local max per column (for hover markers)
     """
-    out: Dict[str, Tuple[List[float], List[float]]] = {b: ([], []) for b in "ACGT"}
-    peak_y: List[float] = []
-    A, C, G, T = channels["A"], channels["C"], channels["G"], channels["T"]
+    out: dict[BaseChar, tuple[list[float], list[float]]] = {
+        "A": ([], []),
+        "C": ([], []),
+        "G": ([], []),
+        "T": ([], []),
+    }
+    peak_y: list[float] = []
 
-    for k, (iA, iB) in enumerate(columns, start=1):
-        idx = iA if for_A else iB
-        if idx is None:
-            for b in "ACGT":
-                out[b][0].append(NAN)
-                out[b][1].append(NAN)
+    chA = list(channels.get("A", []))
+    chC = list(channels.get("C", []))
+    chG = list(channels.get("G", []))
+    chT = list(channels.get("T", []))
+    ch_map: dict[BaseChar, list[float]] = {"A": chA, "C": chC, "G": chG, "T": chT}
+
+    for k, (iQ, iR) in enumerate(columns, start=1):
+        base_idx = iQ if for_A else iR
+        x0 = float(k) - 0.5
+        x1 = float(k) + 0.5
+
+        if base_idx is None or base_idx < 0 or base_idx >= len(windows):
+            for b in ("A", "C", "G", "T"):
+                xs, ys = out[b]  # type: ignore[index]
+                xs.append(NAN)
+                ys.append(NAN)
             peak_y.append(0.0)
             continue
 
-        L, R = windows[idx]
-        L = max(0, int(L))
-        R = max(L, int(R))
-        sA, sC, sG, sT = A[L : R + 1], C[L : R + 1], G[L : R + 1], T[L : R + 1]
-        local_max = max(
-            (max(sA) if sA else 0.0),
-            (max(sC) if sC else 0.0),
-            (max(sG) if sG else 0.0),
-            (max(sT) if sT else 0.0),
-            0.0,
-        )
-        peak_y.append(float(local_max))
+        s, e = windows[base_idx]
+        if e < s:
+            s, e = e, s
+        seg_len = max(1, (e - s + 1))
 
         if uniform_samples_per_base:
-            npts = max(2, int(samples_per_base))
-            segs = {
-                "A": _resample_linear(sA, npts),
-                "C": _resample_linear(sC, npts),
-                "G": _resample_linear(sG, npts),
-                "T": _resample_linear(sT, npts),
-            }
+            n_points = max(2, int(samples_per_base))
+            x_seg = _linspace(n_points, x0, x1)
+            local_max = 0.0
+            for b in ("A", "C", "G", "T"):
+                src = ch_map[b]
+                ys_seg: list[float] = []
+                if seg_len == 1:
+                    v = float(src[s]) if s < len(src) else 0.0
+                    ys_seg = [v, v]
+                else:
+                    for t in range(n_points):
+                        pos = s + (t * (seg_len - 1)) / float(n_points - 1)
+                        i0 = int(pos)
+                        i1 = min(i0 + 1, len(src) - 1) if len(src) > 0 else i0
+                        frac = pos - i0
+                        v0 = float(src[i0]) if 0 <= i0 < len(src) else 0.0
+                        v1 = float(src[i1]) if 0 <= i1 < len(src) else 0.0
+                        ys_seg.append((1.0 - frac) * v0 + frac * v1)
+                xs, ys = out[b]  # type: ignore[index]
+                xs.extend(x_seg)
+                ys.extend(ys_seg)
+                xs.append(NAN)
+                ys.append(NAN)
+                local_max = max(local_max, _segment_max(ys_seg))
+            peak_y.append(local_max)
         else:
-            npts = max(2, R - L + 1)
-
-            def _pad2(arr: Sequence[float]) -> List[float]:
-                return [float(arr[0])] * 2 if len(arr) == 1 else [float(v) for v in arr]
-
-            segs = {"A": _pad2(sA), "C": _pad2(sC), "G": _pad2(sG), "T": _pad2(sT)}
-
-        x_segment = _map_window_to_column_x(k, npts)
-        for b in "ACGT":
-            xs, ys = out[b]
-            ys_seg = segs[b]
-            if len(ys_seg) != len(x_segment):
-                n = min(len(ys_seg), len(x_segment))
-                ys_seg = ys_seg[:n]
-                xuse = x_segment[:n]
-            else:
-                xuse = x_segment
-            xs.extend(xuse)
-            ys.extend(ys_seg)
-            xs.append(NAN)
-            ys.append(NAN)
+            x_seg = _linspace(seg_len, x0, x1)
+            local_max = 0.0
+            for b in ("A", "C", "G", "T"):
+                src = ch_map[b]
+                ys_seg = [
+                    float(src[i]) if 0 <= i < len(src) else 0.0 for i in range(s, e + 1)
+                ]
+                xs, ys = out[b]  # type: ignore[index]
+                xs.extend(x_seg)
+                ys.extend(ys_seg)
+                xs.append(NAN)
+                ys.append(NAN)
+                local_max = max(local_max, _segment_max(ys_seg))
+            peak_y.append(local_max)
 
     return out, peak_y

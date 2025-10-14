@@ -1,18 +1,15 @@
 # src/abi_sauce/ui/components.py
 from __future__ import annotations
-from typing import List, Optional
+
 import streamlit as st
 
-from abi_sauce.models import AssetBase, SequenceAsset, TraceAsset
-from abi_sauce.services.sample_manager import SampleManager
-
-# New focused modules
-from abi_sauce.ui.trace_viewer import render_trace_asset
-from abi_sauce.ui.sequence_viewer import render_sequence_asset
+from abi_sauce.models import AssetBase, Sample, SequenceAsset, TraceAsset
 from abi_sauce.ui.sample_editor import sample_editor  # re-exported
+from abi_sauce.ui.sequence_viewer import render_sequence_asset
+from abi_sauce.ui.trace_viewer import render_trace_asset
 
 
-def asset_table(assets: List[AssetBase]) -> Optional[str]:
+def asset_table(assets: list[AssetBase]) -> str | None:
     if not assets:
         st.info("No files uploaded yet.")
         return None
@@ -37,8 +34,8 @@ def asset_detail(asset: AssetBase) -> None:
     st.write(asset)
 
 
-def sample_table(samples: List["SampleManager"]) -> Optional[str]:
-    # Signature retained; behavior unchanged.
+def sample_table(samples: list[Sample]) -> str | None:
+    # Signature retained; behavior corrected to Sample list.
     if not samples:
         st.info("No samples yet — upload files on the Uploads page.")
     labels = [f"{s.name}" for s in samples]

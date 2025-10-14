@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Optional, List, Dict, Any, Tuple
+
 import html
+from typing import Any
+
+import plotly.graph_objects as go
 import streamlit as st
-import plotly.graph_objects as go  # NEW: for the optional Plotly strip
+
 from abi_sauce.models import SequenceAsset
+from abi_sauce.ui import theme
 
 
 def _build_fasta(name: str, seq: str) -> str:
@@ -17,7 +21,7 @@ def _build_fasta(name: str, seq: str) -> str:
 def _colored_sequence_html(
     seq: str,
     *,
-    keep_range_0b: Optional[Tuple[int, int]] = None,  # 0-based inclusive (L, R)
+    keep_range_0b: tuple[int, int] | None = None,  # 0-based inclusive (L, R)
     wrap: int = 70,
     crosshatch_trim: bool = True,
     color_bases: bool = False,  # optional A/C/G/T coloring for kept region
@@ -34,9 +38,6 @@ def _colored_sequence_html(
         R = min(len(seq) - 1, int(R))
         if R < L:
             L = R = None
-
-    # Base colors (optional)
-    base_colors = {"A": "#16a34a", "C": "#2563eb", "G": "#111827", "T": "#dc2626"}
 
     mono_div = (
         "font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "
@@ -56,9 +57,9 @@ def _colored_sequence_html(
     def keep_style_for(ch: str) -> str:
         if not color_bases:
             return ""
-        return f"color:{base_colors.get(ch.upper(), '#111827')};"
+        return f"color:{theme.base_color(ch)};"
 
-    spans: List[str] = []
+    spans: list[str] = []
     n = len(seq)
     for i, ch in enumerate(seq):
         safe = html.escape(ch)
@@ -74,7 +75,7 @@ def _colored_sequence_html(
 def _sequence_plotly_strip(
     seq: str,
     *,
-    keep_range_0b: Optional[Tuple[int, int]] = None,
+    keep_range_0b: tuple[int, int] | None = None,
     color_bases: bool = True,
 ):
     """Small Plotly figure with colored per-base letters + shaded trimmed flanks."""
@@ -83,15 +84,13 @@ def _sequence_plotly_strip(
         return None
     x = list(range(1, n + 1))
     text = list(seq)
-    # per-point colors
-    base_colors = {"A": "green", "C": "blue", "G": "black", "T": "red"}
 
     def color_for(i: int, ch: str) -> str:
         if keep_range_0b is not None:
             L, R = keep_range_0b
             if i < L or i > R:
                 return "#9aa0a6"
-        return base_colors.get(ch.upper(), "#111827") if color_bases else "#111827"
+        return theme.base_color(ch) if color_bases else theme.DEFAULT_TEXT_COLOR
 
     colors = [color_for(i, ch) for i, ch in enumerate(seq)]
 
@@ -103,7 +102,7 @@ def _sequence_plotly_strip(
             mode="text",
             text=text,
             textposition="middle center",
-            textfont=dict(size=12, color=colors),
+            textfont={"size": 12, "color": colors},
             hoverinfo="skip",
             showlegend=False,
         )
@@ -120,7 +119,7 @@ def _sequence_plotly_strip(
                 line_width=0,
                 layer="below",
             )
-        if R < n - 1:
+        if n - 1 > R:
             fig.add_vrect(
                 x0=R + 1.5,
                 x1=n + 0.5,
@@ -132,7 +131,7 @@ def _sequence_plotly_strip(
     fig.update_xaxes(visible=False, range=[0.5, n + 0.5])
     fig.update_yaxes(visible=False, range=[-1, 1])
     fig.update_layout(
-        margin=dict(l=0, r=0, t=0, b=0),
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
         height=56,
     )
     return fig
@@ -142,12 +141,12 @@ def render_sequence_block(
     *,
     name: str,
     sequence: str,
-    features: Optional[List[Dict[str, Any]]] = None,
-    fasta_text: Optional[str] = None,
-    download_filename: Optional[str] = None,
+    features: list[dict[str, Any]] | None = None,
+    fasta_text: str | None = None,
+    download_filename: str | None = None,
     title: str = "Sequence",
     # highlight outside the kept region (0-based inclusive keep)
-    keep_range_0b: Optional[Tuple[int, int]] = None,
+    keep_range_0b: tuple[int, int] | None = None,
     crosshatch_trim: bool = True,
     colorize: bool = False,  # when True, use the HTML renderer
     color_bases: bool = False,  # optionally color A/C/G/T in kept region
