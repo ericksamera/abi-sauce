@@ -4,7 +4,6 @@ import streamlit as st
 
 from abi_sauce.services.file_manager import FileManager
 from abi_sauce.services.sample_manager import SampleManager
-from abi_sauce.ui.components import asset_table, asset_detail
 
 
 def uploads_page():
@@ -33,13 +32,6 @@ def uploads_page():
                     st.toast(f"Skipped duplicate {f.name}")
             except Exception as e:
                 st.warning(f"{f.name}: {e}")
-
-    st.subheader("Assets")
-    assets = fm.list()
-    selected_id = asset_table(assets)
-    if selected_id:
-        asset = fm.get(selected_id)
-        asset_detail(asset)
 
     with st.sidebar:
         st.header("Actions")

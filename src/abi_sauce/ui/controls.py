@@ -80,8 +80,9 @@ def sample_selector(
     exclude: Iterable[str] = (),
     default_id: Optional[str] = None,
     sidebar: bool = False,
+    input_type: str = "radio",  # "radio" | "selectbox"
 ) -> Optional[str]:
-    """Unified sample picker."""
+    """Unified sample picker. Set input_type='selectbox' for a dropdown."""
     samples = [s for s in sm.list() if s.id not in set(exclude)]
     if not samples:
         st.info("No samples yet — upload files on the Uploads page.")
@@ -95,4 +96,8 @@ def sample_selector(
     if default_id and default_id in ids:
         idx = ids.index(default_id)
 
+    if input_type == "selectbox":
+        return target.selectbox(
+            label, ids, index=idx, format_func=lambda sid: labels[sid]
+        )
     return target.radio(label, ids, index=idx, format_func=lambda sid: labels[sid])

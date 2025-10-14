@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Literal
+from typing import List, Literal, Optional, Tuple
 from Bio.Align import PairwiseAligner
 
 # Keep the same external mode names for your UI.
@@ -96,3 +96,35 @@ def pairwise_align(
         if len(results) >= top_n:
             break
     return results
+
+
+# -------- NEW: trace-aware column map (base indices with gaps) -----------------
+
+
+@dataclass(frozen=True)
+class AlignedColumns:
+    """
+    Column-wise mapping produced from gapped alignment strings.
+
+    columns[k] = (iA, iB) where iA is 0-based base index into original seqA
+                  (or None for a gap), and iB likewise for seqB.
+    """
+
+    columns: List[Tuple[Optional[int], Optional[int]]]
+
+
+def build_aligned_columns(a_aln: str, b_aln: str) -> AlignedColumns:
+    """
+    Convert gapped strings into explicit columns of (iA|None, iB|None).
+    """
+    cols: List[Tuple[Optional[int], Optional[int]]] = []
+    ia = ib = 0  # indices into ungapped A/B
+    for ca, cb in zip(a_aln, b_aln):
+        idxA = ia if ca != "-" else None
+        idxB = ib if cb != "-" else None
+        cols.append((idxA, idxB))
+        if ca != "-":
+            ia += 1
+        if cb != "-":
+            ib += 1
+    return AlignedColumns(columns=cols)
