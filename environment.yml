@@ -1,0 +1,8 @@
+name: abi-sauce
+channels:
+  - conda-forge
+dependencies:
+  - biopython
+  - plotly
+  - pip:
+    - streamlit

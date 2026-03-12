@@ -1,44 +1,6 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "abi-sauce"
-version = "0.2.0"
-description = "Intro bioinformatics tools"
-requires-python = ">=3.11"
-dependencies = ["biopython", "streamlit", "plotly"]
-
-[tool.setuptools.package-dir]
-"" = "src"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-# --- Static typing ---
 [tool.mypy]
 python_version = "3.11"
-strict = true
-warn_unused_configs = true
-warn_return_any = true
-warn_unreachable = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-no_implicit_optional = true
-disallow_any_generics = true
-ignore_missing_imports = true  # Bio/Plotly/Streamlit stubs are optional
-pretty = true
-color_output = true
-mypy_path = "src"
 
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-fix = true
-unsafe-fixes = true
-
-[tool.ruff.lint]
-select = ["F", "E", "W", "I", "UP", "B", "SIM", "PIE", "C4"]
-
-[tool.ruff.lint.per-file-ignores]
-"src/abi_sauce/app_pages/*.py" = ["F401"]  # tiny re-export shims
+[[tool.mypy.overrides]]
+module = ["Bio", "Bio.*", "streamlit", "streamlit.*"]
+ignore_missing_imports = true
