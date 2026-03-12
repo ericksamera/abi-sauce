@@ -11,12 +11,20 @@ from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
 _TRACE_KEYS = ("DATA9", "DATA10", "DATA11", "DATA12")
 
 
+class AbiParseError(ValueError):
+    """Raised when an ABI file cannot be parsed."""
+
+
 def parse_ab1_upload(upload: SequenceUpload) -> SequenceRecord:
     """Parse an ABI/AB1 upload into a normalized SequenceRecord."""
     if upload.suffix not in {"ab1", "abi"}:
         raise ValueError(f"Expected an .ab1 or .abi file, got: {upload.filename}")
 
-    bio_record = SeqIO.read(BytesIO(upload.content), "abi")
+    try:
+        bio_record = SeqIO.read(BytesIO(upload.content), "abi")
+    except Exception as exc:
+        raise AbiParseError(f"Failed to parse ABI file: {upload.filename}") from exc
+
     return _to_sequence_record(bio_record=bio_record, source_filename=upload.filename)
 
 
