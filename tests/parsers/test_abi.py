@@ -198,6 +198,7 @@ def test_parse_ab1_upload_wraps_low_level_parse_errors(
     upload = SequenceUpload(filename="broken.ab1", content=b"not-a-real-ab1")
 
     with pytest.raises(
-        abi.AbiParseError, match=r"Failed to parse ABI file: broken\.ab1"
+        abi.AbiParseError,
+        match=r"Failed to parse ABI file: broken\.ab1",
     ):
         abi.parse_ab1_upload(upload)

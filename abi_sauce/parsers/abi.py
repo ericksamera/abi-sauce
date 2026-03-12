@@ -6,13 +6,10 @@ from typing import Any
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord as BioSeqRecord
 
+from abi_sauce.exceptions import AbiParseError
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
 
 _TRACE_KEYS = ("DATA9", "DATA10", "DATA11", "DATA12")
-
-
-class AbiParseError(ValueError):
-    """Raised when an ABI file cannot be parsed."""
 
 
 def parse_ab1_upload(upload: SequenceUpload) -> SequenceRecord:

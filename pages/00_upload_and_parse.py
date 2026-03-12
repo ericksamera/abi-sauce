@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from abi_sauce.exceptions import AbiParseError
 from abi_sauce.models import SequenceUpload
 from abi_sauce.parsers.abi import parse_ab1_upload
 
@@ -32,6 +33,9 @@ st.write(
 
 try:
     record = parse_ab1_upload(upload)
+except AbiParseError as exc:
+    st.error(str(exc))
+    st.stop()
 except Exception as exc:
     st.error("Parsing failed.")
     st.exception(exc)
