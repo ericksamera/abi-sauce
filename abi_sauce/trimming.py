@@ -26,6 +26,8 @@ class TrimResult:
     bases_removed_left: int
     bases_removed_right: int
     passed_min_length: bool
+    fixed_bases_removed_left: int = 0
+    fixed_bases_removed_right: int = 0
     quality_bases_removed_left: int = 0
     quality_bases_removed_right: int = 0
 
@@ -50,11 +52,15 @@ def trim_sequence_record(
             config.error_probability_cutoff,
         )
 
-    start = min(quality_start + config.left_trim, original_length)
-    end = quality_end - config.right_trim
+    available_after_quality = max(quality_end - quality_start, 0)
+    fixed_bases_removed_left = min(config.left_trim, available_after_quality)
+    fixed_bases_removed_right = min(
+        config.right_trim,
+        max(available_after_quality - fixed_bases_removed_left, 0),
+    )
 
-    if end < start:
-        end = start
+    start = quality_start + fixed_bases_removed_left
+    end = quality_end - fixed_bases_removed_right
 
     trimmed_sequence = original_sequence[start:end]
 
@@ -77,6 +83,8 @@ def trim_sequence_record(
         bases_removed_left=start,
         bases_removed_right=original_length - end,
         passed_min_length=trimmed_length >= config.min_length,
+        fixed_bases_removed_left=fixed_bases_removed_left,
+        fixed_bases_removed_right=fixed_bases_removed_right,
         quality_bases_removed_left=quality_start,
         quality_bases_removed_right=original_length - quality_end,
     )

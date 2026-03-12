@@ -1,50 +1,17 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import cast
 
 import streamlit as st
 
-from abi_sauce.exceptions import AbiParseError
-from abi_sauce.export import (
-    ExportError,
-    to_fasta_batch,
-    to_fastq_batch,
-    to_zip_batch,
+from abi_sauce.batch import ExportFormat
+from abi_sauce.services.batch import (
+    apply_trim_config,
+    parse_uploaded_batch,
+    prepare_batch_download,
 )
-from abi_sauce.models import SequenceRecord, SequenceUpload
-from abi_sauce.parsers.abi import parse_ab1_upload
-from abi_sauce.trimming import TrimConfig, trim_sequence_record
-
-ExportFormat = Literal["fasta", "fastq"]
-
-
-def _parse_upload_batch(
-    uploaded_files: list,
-) -> tuple[list[SequenceUpload], dict[str, SequenceRecord], dict[str, str]]:
-    """Normalize and parse a batch of uploaded ABI files."""
-    uploads: list[SequenceUpload] = []
-    parsed_records: dict[str, SequenceRecord] = {}
-    parse_errors: dict[str, str] = {}
-
-    for uploaded_file in sorted(uploaded_files, key=lambda file: file.name):
-        upload = SequenceUpload(
-            filename=uploaded_file.name,
-            content=uploaded_file.getvalue(),
-        )
-        uploads.append(upload)
-
-        try:
-            parsed_records[upload.filename] = parse_ab1_upload(upload)
-        except AbiParseError as exc:
-            parse_errors[upload.filename] = str(exc)
-
-    return uploads, parsed_records, parse_errors
-
-
-def _batch_signature(uploads: list[SequenceUpload]) -> tuple[tuple[str, int], ...]:
-    """Return a stable signature for a batch of uploads."""
-    return tuple((upload.filename, upload.size_bytes) for upload in uploads)
-
+from abi_sauce.exceptions import ExportError
+from abi_sauce.trimming import TrimConfig
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
 st.title("ABI Sauce")
@@ -59,7 +26,10 @@ if not uploaded_files:
     st.info("Upload one or more .ab1 files to test the parser.")
     st.stop()
 
-uploads, parsed_records, parse_errors = _parse_upload_batch(uploaded_files)
+parsed_batch = parse_uploaded_batch(uploaded_files)
+uploads = parsed_batch.uploads
+parsed_records = parsed_batch.parsed_records
+parse_errors = parsed_batch.parse_errors
 
 st.write(
     {
@@ -78,9 +48,8 @@ if not parsed_records:
     st.error("No ABI files could be parsed from this batch.")
     st.stop()
 
-batch_signature = _batch_signature(uploads)
-if st.session_state.get("upload_signature") != batch_signature:
-    st.session_state.upload_signature = batch_signature
+if st.session_state.get("upload_signature") != parsed_batch.signature:
+    st.session_state.upload_signature = parsed_batch.signature
     st.session_state.applied_trim_config = None
     st.session_state.selected_record_name = next(iter(parsed_records))
     st.session_state.trim_quality_enabled = False
@@ -88,6 +57,7 @@ if st.session_state.get("upload_signature") != batch_signature:
     st.session_state.batch_export_format = "fasta"
     st.session_state.concatenate_batch = True
     st.session_state.batch_filename_stem = "abi-sauce-batch"
+    st.session_state.exclude_failed_min_length_from_export = True
 
 selected_record_name = st.selectbox(
     "Selected record",
@@ -167,11 +137,23 @@ if applied_trim_config is None:
     st.code(record.sequence[:500] or "<empty>")
     st.stop()
 
-trim_results = {
-    name: trim_sequence_record(parsed_record, applied_trim_config)
-    for name, parsed_record in parsed_records.items()
-}
+prepared_batch = apply_trim_config(parsed_batch, applied_trim_config)
+trim_results = prepared_batch.trim_results
+batch_summary = prepared_batch.batch_summary
 trim_result = trim_results[selected_record_name]
+
+st.subheader("Batch summary")
+st.write(
+    {
+        "trimmed_records": batch_summary.trimmed_records,
+        "records_passing_min_length": batch_summary.records_passing_min_length,
+        "records_failing_min_length": batch_summary.records_failing_min_length,
+        "fastq_exportable_records": batch_summary.fastq_exportable_records,
+    }
+)
+st.dataframe(batch_summary.table_rows(), hide_index=True, width="stretch")
+
+st.subheader("Selected record detail")
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
@@ -225,39 +207,50 @@ concatenate_batch = st.checkbox(
     value=True,
     key="concatenate_batch",
 )
-batch_filename_stem = (
-    st.text_input(
-        "Output filename stem",
-        value="abi-sauce-batch",
-        key="batch_filename_stem",
-    ).strip()
-    or "abi-sauce-batch"
+batch_filename_stem = st.text_input(
+    "Output filename stem",
+    value="abi-sauce-batch",
+    key="batch_filename_stem",
+)
+
+exclude_failed_min_length = st.checkbox(
+    "Exclude sequences failing minimum length",
+    value=True,
+    key="exclude_failed_min_length_from_export",
 )
 
 try:
-    trimmed_records = [result.record for result in trim_results.values()]
-    export_data: str | bytes
-    export_filename: str
-    export_mime: str
-
-    if concatenate_batch and export_format == "fasta":
-        export_data = to_fasta_batch(trimmed_records)
-        export_filename = f"{batch_filename_stem}.fasta"
-        export_mime = "text/plain"
-    elif concatenate_batch and export_format == "fastq":
-        export_data = to_fastq_batch(trimmed_records)
-        export_filename = f"{batch_filename_stem}.fastq"
-        export_mime = "text/plain"
-    else:
-        export_data = to_zip_batch(trimmed_records, export_format=export_format)
-        export_filename = f"{batch_filename_stem}.zip"
-        export_mime = "application/zip"
+    download_artifact = prepare_batch_download(
+        prepared_batch,
+        export_format=export_format,
+        concatenate_batch=bool(concatenate_batch),
+        filename_stem=batch_filename_stem,
+        require_min_length=bool(exclude_failed_min_length),
+    )
 except ExportError as exc:
     st.warning(str(exc))
 else:
-    st.download_button(
-        label="Download trimmed batch",
-        data=export_data,
-        file_name=export_filename,
-        mime=export_mime,
+    st.write(
+        {
+            "exportable_records": len(download_artifact.eligible_records),
+            "excluded_records": len(download_artifact.ineligible_reasons),
+        }
     )
+
+    if export_format == "fastq" and download_artifact.ineligible_reasons:
+        st.info("FASTQ export will include only FASTQ-eligible records.")
+
+    if download_artifact.ineligible_reasons:
+        with st.expander("Excluded from current export"):
+            for filename, reasons in download_artifact.ineligible_reasons:
+                st.warning(f"{filename}: {', '.join(reasons)}")
+
+    if not download_artifact.is_downloadable:
+        st.warning("No trimmed records are eligible for this export selection.")
+    else:
+        st.download_button(
+            label="Download trimmed batch",
+            data=download_artifact.data,
+            file_name=download_artifact.filename,
+            mime=download_artifact.mime,
+        )

@@ -39,6 +39,8 @@ def test_trim_sequence_record_left_trim() -> None:
     assert result.record.sequence == "GTACGT"
     assert result.bases_removed_left == 2
     assert result.bases_removed_right == 0
+    assert result.fixed_bases_removed_left == 2
+    assert result.fixed_bases_removed_right == 0
 
 
 def test_trim_sequence_record_right_trim() -> None:
@@ -48,6 +50,8 @@ def test_trim_sequence_record_right_trim() -> None:
     assert result.record.sequence == "ACGTA"
     assert result.bases_removed_left == 0
     assert result.bases_removed_right == 3
+    assert result.fixed_bases_removed_left == 0
+    assert result.fixed_bases_removed_right == 3
 
 
 def test_trim_sequence_record_left_and_right_trim() -> None:
@@ -215,6 +219,8 @@ def test_trim_sequence_record_quality_trim_and_fixed_trim_combine() -> None:
     assert result.record.qualities == [35, 40]
     assert result.quality_bases_removed_left == 2
     assert result.quality_bases_removed_right == 2
+    assert result.fixed_bases_removed_left == 1
+    assert result.fixed_bases_removed_right == 1
     assert result.bases_removed_left == 3
     assert result.bases_removed_right == 3
 
@@ -237,7 +243,33 @@ def test_trim_sequence_record_quality_trim_all_bases_rejected() -> None:
     assert result.trimmed_length == 0
     assert result.quality_bases_removed_left == 0
     assert result.quality_bases_removed_right == 4
+    assert result.fixed_bases_removed_left == 0
+    assert result.fixed_bases_removed_right == 0
     assert result.passed_min_length is False
+
+
+def test_trim_sequence_record_overtrim_preserves_fixed_side_attribution() -> None:
+    record = make_record(
+        sequence="ACGTACGT",
+        qualities=[5, 8, 30, 35, 40, 25, 7, 3],
+    )
+    result = trim_sequence_record(
+        record,
+        TrimConfig(
+            left_trim=10,
+            right_trim=10,
+            quality_trim_enabled=True,
+            error_probability_cutoff=0.01,
+        ),
+    )
+
+    assert result.record.sequence == ""
+    assert result.fixed_bases_removed_left == 4
+    assert result.fixed_bases_removed_right == 0
+    assert result.quality_bases_removed_left == 2
+    assert result.quality_bases_removed_right == 2
+    assert result.bases_removed_left == 6
+    assert result.bases_removed_right == 2
 
 
 def test_trim_sequence_record_quality_trim_can_fail_min_length() -> None:
