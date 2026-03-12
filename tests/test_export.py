@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import io
+import zipfile
+
 import pytest
 
-from abi_sauce.export import ExportError, to_fasta, to_fastq
+from abi_sauce.export import (
+    ExportError,
+    to_fasta,
+    to_fasta_batch,
+    to_fastq,
+    to_fastq_batch,
+    to_zip_batch,
+)
 from abi_sauce.models import SequenceRecord
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
 
@@ -117,3 +127,40 @@ def test_export_header_collapses_whitespace() -> None:
     result = to_fasta(record)
 
     assert result == ">trace 001 sample\nACGT\n"
+
+
+def test_to_fasta_batch_concatenates_records() -> None:
+    records = [
+        make_record(name="trace_001", sequence="ACGT"),
+        make_record(name="trace_002", sequence="TGCA"),
+    ]
+
+    result = to_fasta_batch(records)
+    assert result == ">trace_001\nACGT\n>trace_002\nTGCA\n"
+
+
+def test_to_fastq_batch_concatenates_records() -> None:
+    records = [
+        make_record(name="trace_001", sequence="AC", qualities=[40, 41]),
+        make_record(name="trace_002", sequence="GT", qualities=[42, 43]),
+    ]
+
+    result = to_fastq_batch(records)
+    assert result == "@trace_001\nAC\n+\nIJ\n@trace_002\nGT\n+\nKL\n"
+
+
+def test_to_zip_batch_writes_individual_fasta_files() -> None:
+    records = [
+        make_record(name="trace 001", sequence="ACGT"),
+        make_record(name="trace 002", sequence="TGCA"),
+    ]
+
+    result = to_zip_batch(records, export_format="fasta")
+
+    with zipfile.ZipFile(io.BytesIO(result)) as zip_file:
+        assert zip_file.namelist() == [
+            "001_trace_001.fasta",
+            "002_trace_002.fasta",
+        ]
+        assert zip_file.read("001_trace_001.fasta").decode() == ">trace 001\nACGT\n"
+        assert zip_file.read("002_trace_002.fasta").decode() == ">trace 002\nTGCA\n"

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from io import BytesIO
+from typing import Literal
+import zipfile
+
 from abi_sauce.exceptions import ExportError
 from abi_sauce.models import SequenceRecord
 
@@ -32,10 +37,82 @@ def to_fastq(record: SequenceRecord) -> str:
     return f"@{header}\n{record.sequence}\n+\n{quality_string}\n"
 
 
+def to_fasta_batch(
+    records: Iterable[SequenceRecord],
+    *,
+    line_width: int = 80,
+) -> str:
+    """Serialize multiple sequence records into one FASTA string."""
+    return "".join(to_fasta(record, line_width=line_width) for record in records)
+
+
+def to_fastq_batch(records: Iterable[SequenceRecord]) -> str:
+    """Serialize multiple sequence records into one FASTQ string."""
+    return "".join(to_fastq(record) for record in records)
+
+
+def to_zip_batch(
+    records: Iterable[SequenceRecord],
+    *,
+    export_format: Literal["fasta", "fastq"],
+    line_width: int = 80,
+) -> bytes:
+    """Serialize records into a ZIP of per-record FASTA/FASTQ files."""
+    with BytesIO() as file_buffer:
+        with zipfile.ZipFile(
+            file_buffer,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as zip_file:
+            for index, record in enumerate(records, start=1):
+                basename = _safe_filename(_header_for_record(record))
+                if not basename:
+                    basename = f"sequence_{index:03d}"
+
+                zip_file.writestr(
+                    f"{index:03d}_{basename}.{_extension_for_format(export_format)}",
+                    _serialize_record(
+                        record,
+                        export_format=export_format,
+                        line_width=line_width,
+                    ),
+                )
+
+        return file_buffer.getvalue()
+
+
 def _header_for_record(record: SequenceRecord) -> str:
     """Build a stable single-line export header for a sequence record."""
     header = record.name or record.record_id or "sequence"
     return " ".join(header.split()) or "sequence"
+
+
+def _serialize_record(
+    record: SequenceRecord,
+    *,
+    export_format: Literal["fasta", "fastq"],
+    line_width: int = 80,
+) -> str:
+    """Serialize a single record in the requested format."""
+    if export_format == "fasta":
+        return to_fasta(record, line_width=line_width)
+    if export_format == "fastq":
+        return to_fastq(record)
+
+    raise ExportError(f"Unsupported export format: {export_format}")
+
+
+def _extension_for_format(export_format: Literal["fasta", "fastq"]) -> str:
+    """Return the file extension for an export format."""
+    return export_format
+
+
+def _safe_filename(value: str) -> str:
+    """Convert a record header into a filesystem-safe stem."""
+    collapsed = "_".join(value.split())
+    return "".join(
+        char for char in collapsed if char.isalnum() or char in {"-", "_", "."}
+    ).strip("._-")
 
 
 def _wrap_sequence(sequence: str, line_width: int) -> str:
