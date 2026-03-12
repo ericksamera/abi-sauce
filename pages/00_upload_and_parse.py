@@ -60,6 +60,8 @@ upload_signature = (upload.filename, upload.size_bytes)
 if st.session_state.get("upload_signature") != upload_signature:
     st.session_state.upload_signature = upload_signature
     st.session_state.applied_trim_config = None
+    st.session_state.trim_quality_enabled = False
+    st.session_state.trim_quality_threshold = 20
 
 with st.form("trim_form"):
     st.subheader("Trim")
@@ -84,6 +86,19 @@ with st.form("trim_form"):
         step=1,
         key="trim_min_length",
     )
+    quality_trim_enabled = st.checkbox(
+        "Enable quality trimming",
+        value=False,
+        key="trim_quality_enabled",
+    )
+    quality_threshold = st.number_input(
+        "Quality threshold",
+        min_value=0,
+        value=20,
+        step=1,
+        key="trim_quality_threshold",
+        disabled=not quality_trim_enabled,
+    )
     submitted = st.form_submit_button("Apply trim")
 
 if submitted:
@@ -91,6 +106,8 @@ if submitted:
         left_trim=int(left_trim),
         right_trim=int(right_trim),
         min_length=int(min_length),
+        quality_trim_enabled=bool(quality_trim_enabled),
+        quality_threshold=int(quality_threshold),
     )
 
 applied_trim_config = st.session_state.get("applied_trim_config")
@@ -102,17 +119,29 @@ if applied_trim_config is None:
 
 trim_result = trim_sequence_record(record, applied_trim_config)
 
-col1, col2 = st.columns(2)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Original length", trim_result.original_length)
 with col2:
     st.metric("Trimmed length", trim_result.trimmed_length)
+with col3:
+    st.metric(
+        "Quality trim left",
+        trim_result.quality_bases_removed_left,
+    )
+with col4:
+    st.metric(
+        "Quality trim right",
+        trim_result.quality_bases_removed_right,
+    )
 
 st.write(
     {
         "bases_removed_left": trim_result.bases_removed_left,
         "bases_removed_right": trim_result.bases_removed_right,
         "passed_min_length": trim_result.passed_min_length,
+        "quality_trim_enabled": applied_trim_config.quality_trim_enabled,
+        "quality_threshold": applied_trim_config.quality_threshold,
     }
 )
 
