@@ -5,6 +5,7 @@ import streamlit as st
 from abi_sauce.exceptions import AbiParseError
 from abi_sauce.models import SequenceUpload
 from abi_sauce.parsers.abi import parse_ab1_upload
+from abi_sauce.trimming import TrimConfig, trim_sequence_record
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
 st.title("ABI Sauce")
@@ -52,3 +53,50 @@ st.write(
         "has_trace_data": record.trace_data is not None,
     }
 )
+
+with st.form("trim_form"):
+    st.subheader("Trim")
+    left_trim = st.number_input("Left trim", min_value=0, value=0, step=1)
+    right_trim = st.number_input("Right trim", min_value=0, value=0, step=1)
+    min_length = st.number_input("Minimum length", min_value=0, value=1, step=1)
+    apply_trim = st.form_submit_button("Apply trim")
+
+if not apply_trim:
+    st.subheader("Raw sequence preview")
+    st.code(record.sequence[:500] or "<empty>")
+    st.stop()
+
+trim_result = trim_sequence_record(
+    record,
+    TrimConfig(
+        left_trim=int(left_trim),
+        right_trim=int(right_trim),
+        min_length=int(min_length),
+    ),
+)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Original length", trim_result.original_length)
+with col2:
+    st.metric("Trimmed length", trim_result.trimmed_length)
+
+st.write(
+    {
+        "bases_removed_left": trim_result.bases_removed_left,
+        "bases_removed_right": trim_result.bases_removed_right,
+        "passed_min_length": trim_result.passed_min_length,
+    }
+)
+
+if not trim_result.passed_min_length:
+    st.warning("Trimmed sequence did not meet the minimum length.")
+
+raw_col, trimmed_col = st.columns(2)
+with raw_col:
+    st.subheader("Raw sequence")
+    st.code(record.sequence[:500] or "<empty>")
+
+with trimmed_col:
+    st.subheader("Trimmed sequence")
+    st.code(trim_result.record.sequence[:500] or "<empty>")
