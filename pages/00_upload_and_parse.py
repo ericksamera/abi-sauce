@@ -61,7 +61,7 @@ if st.session_state.get("upload_signature") != upload_signature:
     st.session_state.upload_signature = upload_signature
     st.session_state.applied_trim_config = None
     st.session_state.trim_quality_enabled = False
-    st.session_state.trim_quality_threshold = 20
+    st.session_state.trim_error_probability_cutoff = 0.01
 
 with st.form("trim_form"):
     st.subheader("Trim")
@@ -87,17 +87,21 @@ with st.form("trim_form"):
         key="trim_min_length",
     )
     quality_trim_enabled = st.checkbox(
-        "Enable quality trimming",
-        value=False,
+        "Enable Mott quality trimming",
         key="trim_quality_enabled",
     )
-    quality_threshold = st.number_input(
-        "Quality threshold",
-        min_value=0,
-        value=20,
-        step=1,
-        key="trim_quality_threshold",
+    error_probability_cutoff = st.number_input(
+        "Mott max acceptable error probability",
+        min_value=0.0,
+        max_value=1.0,
+        step=0.0001,
+        format="%.4f",
+        key="trim_error_probability_cutoff",
         disabled=not quality_trim_enabled,
+        help=(
+            "Lower values trim more aggressively. Examples: "
+            "Q20 = 0.01, Q30 = 0.001, Q40 = 0.0001."
+        ),
     )
     submitted = st.form_submit_button("Apply trim")
 
@@ -107,7 +111,7 @@ if submitted:
         right_trim=int(right_trim),
         min_length=int(min_length),
         quality_trim_enabled=bool(quality_trim_enabled),
-        quality_threshold=int(quality_threshold),
+        error_probability_cutoff=float(error_probability_cutoff),
     )
 
 applied_trim_config = st.session_state.get("applied_trim_config")
@@ -141,7 +145,7 @@ st.write(
         "bases_removed_right": trim_result.bases_removed_right,
         "passed_min_length": trim_result.passed_min_length,
         "quality_trim_enabled": applied_trim_config.quality_trim_enabled,
-        "quality_threshold": applied_trim_config.quality_threshold,
+        "error_probability_cutoff": applied_trim_config.error_probability_cutoff,
     }
 )
 

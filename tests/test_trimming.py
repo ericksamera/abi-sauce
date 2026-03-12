@@ -113,7 +113,7 @@ def test_trim_sequence_record_quality_trim_left_end() -> None:
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
@@ -132,7 +132,7 @@ def test_trim_sequence_record_quality_trim_right_end() -> None:
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
@@ -151,7 +151,7 @@ def test_trim_sequence_record_quality_trim_both_ends() -> None:
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
@@ -161,21 +161,21 @@ def test_trim_sequence_record_quality_trim_both_ends() -> None:
     assert result.quality_bases_removed_right == 2
 
 
-def test_trim_sequence_record_quality_trim_keeps_low_quality_internal_bases() -> None:
+def test_trim_sequence_record_quality_trim_keeps_mild_internal_dips() -> None:
     record = make_record(
         sequence="ACGTACGT",
-        qualities=[30, 30, 5, 30, 5, 30, 30, 30],
+        qualities=[30, 30, 20, 30, 20, 30, 30, 30],
     )
     result = trim_sequence_record(
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
     assert result.record.sequence == "ACGTACGT"
-    assert result.record.qualities == [30, 30, 5, 30, 5, 30, 30, 30]
+    assert result.record.qualities == [30, 30, 20, 30, 20, 30, 30, 30]
     assert result.quality_bases_removed_left == 0
     assert result.quality_bases_removed_right == 0
 
@@ -186,7 +186,7 @@ def test_trim_sequence_record_quality_trim_is_skipped_when_qualities_missing() -
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
@@ -207,7 +207,7 @@ def test_trim_sequence_record_quality_trim_and_fixed_trim_combine() -> None:
             left_trim=1,
             right_trim=1,
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
@@ -219,7 +219,7 @@ def test_trim_sequence_record_quality_trim_and_fixed_trim_combine() -> None:
     assert result.bases_removed_right == 3
 
 
-def test_trim_sequence_record_quality_trim_all_bases_below_threshold() -> None:
+def test_trim_sequence_record_quality_trim_all_bases_rejected() -> None:
     record = make_record(
         sequence="ACGT",
         qualities=[5, 6, 7, 8],
@@ -228,15 +228,16 @@ def test_trim_sequence_record_quality_trim_all_bases_below_threshold() -> None:
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
         ),
     )
 
     assert result.record.sequence == ""
     assert result.record.qualities == []
     assert result.trimmed_length == 0
-    assert result.quality_bases_removed_left == 4
-    assert result.quality_bases_removed_right == 0
+    assert result.quality_bases_removed_left == 0
+    assert result.quality_bases_removed_right == 4
+    assert result.passed_min_length is False
 
 
 def test_trim_sequence_record_quality_trim_can_fail_min_length() -> None:
@@ -248,7 +249,7 @@ def test_trim_sequence_record_quality_trim_can_fail_min_length() -> None:
         record,
         TrimConfig(
             quality_trim_enabled=True,
-            quality_threshold=20,
+            error_probability_cutoff=0.01,
             min_length=5,
         ),
     )
@@ -258,14 +259,58 @@ def test_trim_sequence_record_quality_trim_can_fail_min_length() -> None:
     assert result.passed_min_length is False
 
 
-def test_trim_sequence_record_rejects_negative_quality_threshold() -> None:
+def test_trim_sequence_record_rejects_invalid_error_probability_cutoff() -> None:
     record = make_record()
 
-    with pytest.raises(ValueError, match="quality_threshold must be >= 0"):
+    with pytest.raises(
+        ValueError, match="error_probability_cutoff must be between 0 and 1"
+    ):
         trim_sequence_record(
             record,
             TrimConfig(
                 quality_trim_enabled=True,
-                quality_threshold=-1,
+                error_probability_cutoff=-1,
             ),
         )
+
+
+def test_trim_sequence_record_rejects_misaligned_qualities() -> None:
+    record = make_record(sequence="ACGT", qualities=[30, 31, 32])
+
+    with pytest.raises(
+        ValueError,
+        match="record.qualities must have the same length as record.sequence",
+    ):
+        trim_sequence_record(record, TrimConfig())
+
+
+def test_trim_sequence_record_quality_trim_keeps_single_high_quality_base() -> None:
+    record = make_record(sequence="A", qualities=[30])
+    result = trim_sequence_record(
+        record,
+        TrimConfig(
+            quality_trim_enabled=True,
+            error_probability_cutoff=0.01,
+        ),
+    )
+
+    assert result.record.sequence == "A"
+    assert result.record.qualities == [30]
+    assert result.quality_bases_removed_left == 0
+    assert result.quality_bases_removed_right == 0
+
+
+def test_trim_sequence_record_quality_trim_rejects_bases_exactly_at_cutoff() -> None:
+    record = make_record(sequence="AAA", qualities=[20, 20, 20])
+    result = trim_sequence_record(
+        record,
+        TrimConfig(
+            quality_trim_enabled=True,
+            error_probability_cutoff=0.01,
+        ),
+    )
+
+    assert result.record.sequence == ""
+    assert result.record.qualities == []
+    assert result.quality_bases_removed_left == 0
+    assert result.quality_bases_removed_right == 3
