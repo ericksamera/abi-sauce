@@ -11,3 +11,7 @@ class ParseError(AbiSauceError):
 
 class AbiParseError(ParseError):
     """Raised when an ABI file cannot be parsed."""
+
+
+class ExportError(AbiSauceError):
+    """Raised when a sequence record cannot be exported."""

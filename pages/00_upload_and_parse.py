@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from abi_sauce.exceptions import AbiParseError
+from abi_sauce.export import ExportError, to_fasta, to_fastq
 from abi_sauce.models import SequenceUpload
 from abi_sauce.parsers.abi import parse_ab1_upload
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
@@ -54,26 +55,52 @@ st.write(
     }
 )
 
+# Reset applied trim when a new upload appears.
+upload_signature = (upload.filename, upload.size_bytes)
+if st.session_state.get("upload_signature") != upload_signature:
+    st.session_state.upload_signature = upload_signature
+    st.session_state.applied_trim_config = None
+
 with st.form("trim_form"):
     st.subheader("Trim")
-    left_trim = st.number_input("Left trim", min_value=0, value=0, step=1)
-    right_trim = st.number_input("Right trim", min_value=0, value=0, step=1)
-    min_length = st.number_input("Minimum length", min_value=0, value=1, step=1)
-    apply_trim = st.form_submit_button("Apply trim")
+    left_trim = st.number_input(
+        "Left trim",
+        min_value=0,
+        value=0,
+        step=1,
+        key="trim_left",
+    )
+    right_trim = st.number_input(
+        "Right trim",
+        min_value=0,
+        value=0,
+        step=1,
+        key="trim_right",
+    )
+    min_length = st.number_input(
+        "Minimum length",
+        min_value=0,
+        value=1,
+        step=1,
+        key="trim_min_length",
+    )
+    submitted = st.form_submit_button("Apply trim")
 
-if not apply_trim:
+if submitted:
+    st.session_state.applied_trim_config = TrimConfig(
+        left_trim=int(left_trim),
+        right_trim=int(right_trim),
+        min_length=int(min_length),
+    )
+
+applied_trim_config = st.session_state.get("applied_trim_config")
+
+if applied_trim_config is None:
     st.subheader("Raw sequence preview")
     st.code(record.sequence[:500] or "<empty>")
     st.stop()
 
-trim_result = trim_sequence_record(
-    record,
-    TrimConfig(
-        left_trim=int(left_trim),
-        right_trim=int(right_trim),
-        min_length=int(min_length),
-    ),
-)
+trim_result = trim_sequence_record(record, applied_trim_config)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -100,3 +127,31 @@ with raw_col:
 with trimmed_col:
     st.subheader("Trimmed sequence")
     st.code(trim_result.record.sequence[:500] or "<empty>")
+
+st.subheader("Download")
+export_format = st.selectbox(
+    "Format",
+    options=["fasta", "fastq"],
+    key="export_format",
+)
+
+try:
+    if export_format == "fasta":
+        export_text = to_fasta(trim_result.record)
+        export_filename = (
+            f"{trim_result.record.name or trim_result.record.record_id}.fasta"
+        )
+    else:
+        export_text = to_fastq(trim_result.record)
+        export_filename = (
+            f"{trim_result.record.name or trim_result.record.record_id}.fastq"
+        )
+except ExportError as exc:
+    st.warning(str(exc))
+else:
+    st.download_button(
+        label="Download trimmed sequence",
+        data=export_text,
+        file_name=export_filename,
+        mime="text/plain",
+    )
