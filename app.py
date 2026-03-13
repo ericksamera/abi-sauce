@@ -135,31 +135,6 @@ if st.sidebar.button(
     _clear_active_batch_and_uploader()
     st.rerun()
 
-st.sidebar.divider()
-if active_parsed_batch is None:
-    st.sidebar.info("No active batch loaded.")
-else:
-    st.sidebar.subheader("Active batch summary")
-    st.sidebar.write(
-        {
-            "uploaded_files": len(active_parsed_batch.uploads),
-            "parsed_files": len(active_parsed_batch.parsed_records),
-            "failed_files": len(active_parsed_batch.parse_errors),
-        }
-    )
-    if active_parsed_batch.parsed_records:
-        preview_names = list(active_parsed_batch.parsed_records)[:5]
-        st.sidebar.caption("Parsed records")
-        for filename in preview_names:
-            st.sidebar.write(f"- {filename}")
-        remaining_count = len(active_parsed_batch.parsed_records) - len(preview_names)
-        if remaining_count > 0:
-            st.sidebar.caption(f"... and {remaining_count} more record(s).")
-    if active_parsed_batch.parse_errors:
-        with st.sidebar.expander("Parse failures"):
-            for filename, message in active_parsed_batch.parse_errors.items():
-                st.write(f"{filename}: {message}")
-
 navigation = st.navigation(
     [
         st.Page("pages/00_home.py", title="Home", icon=":material/home:"),
