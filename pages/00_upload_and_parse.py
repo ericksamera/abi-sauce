@@ -4,9 +4,8 @@ from typing import cast
 
 import streamlit as st
 
-from abi_sauce.batch import ExportFormat
-from abi_sauce.exceptions import ExportError
-from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
+from abi_sauce.batch_download_ui import render_batch_download_controls
+from abi_sauce.services.batch import apply_trim_configs
 from abi_sauce.trim_state import (
     BatchTrimState,
     DEFAULT_BATCH_TRIM_CONFIG,
@@ -231,59 +230,9 @@ st.subheader("Batch summary")
 st.dataframe(batch_summary_rows, hide_index=True, width="stretch")
 
 st.subheader("Batch download")
-export_format = st.selectbox(
-    "Format",
-    options=["fasta", "fastq"],
-    key="batch_export_format",
+render_batch_download_controls(
+    prepared_batch=prepared_batch,
+    key_prefix="abi_sauce.batch_viewer.download",
+    default_filename_stem="abi-sauce-trim",
+    button_label="Download trimmed batch",
 )
-export_format = cast(ExportFormat, export_format)
-
-concatenate_batch = st.checkbox(
-    "Concatenate entries into a single file",
-    key="concatenate_batch",
-)
-batch_filename_stem = st.text_input(
-    "Output filename stem",
-    key="batch_filename_stem",
-)
-
-exclude_failed_min_length = st.checkbox(
-    "Exclude sequences failing minimum length",
-    key="exclude_failed_min_length_from_export",
-)
-
-try:
-    download_artifact = prepare_batch_download(
-        prepared_batch,
-        export_format=export_format,
-        concatenate_batch=bool(concatenate_batch),
-        filename_stem=batch_filename_stem,
-        require_min_length=bool(exclude_failed_min_length),
-    )
-except ExportError as exc:
-    st.warning(str(exc))
-else:
-    st.write(
-        {
-            "exportable_records": len(download_artifact.eligible_records),
-            "excluded_records": len(download_artifact.ineligible_reasons),
-        }
-    )
-
-    if export_format == "fastq" and download_artifact.ineligible_reasons:
-        st.info("FASTQ export will include only FASTQ-eligible records.")
-
-    if download_artifact.ineligible_reasons:
-        with st.expander("Excluded from current export"):
-            for filename, reasons in download_artifact.ineligible_reasons:
-                st.warning(f"{filename}: {', '.join(reasons)}")
-
-    if not download_artifact.is_downloadable:
-        st.warning("No trimmed records are eligible for this export selection.")
-    else:
-        st.download_button(
-            label="Download trimmed batch",
-            data=download_artifact.data,
-            file_name=download_artifact.filename,
-            mime=download_artifact.mime,
-        )

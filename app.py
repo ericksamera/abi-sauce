@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 import streamlit as st
 
+from abi_sauce.batch_download_ui import render_batch_download_controls
 from abi_sauce.viewer_state import get_batch_trim_state
 from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
 from abi_sauce.trim_state import resolve_batch_trim_inputs
@@ -27,6 +28,7 @@ from abi_sauce.viewer_state import clear_viewer_session_state
 
 _UPLOADER_NONCE_SESSION_KEY = "abi_sauce.uploader_nonce"
 _UPLOADER_KEY_PREFIX = "abi_sauce.active_batch_uploads"
+_SIDEBAR_DOWNLOAD_POPOVER_KEY = "abi_sauce.sidebar.download_popover"
 
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
@@ -153,18 +155,24 @@ def _upload_batch_dialog() -> None:
         st.rerun()
 
 
-def _build_blast_url() -> str | None:
+def _prepare_active_batch():
     parsed_batch = get_active_parsed_batch(st.session_state)
     if parsed_batch is None or not parsed_batch.parsed_records:
         return None
 
     trim_state = get_batch_trim_state(st.session_state)
     resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-    prepared_batch = apply_trim_configs(
+    return apply_trim_configs(
         parsed_batch,
         default_trim_config=resolved_trim_inputs.default_trim_config,
         trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
     )
+
+
+def _build_blast_url() -> str | None:
+    prepared_batch = _prepare_active_batch()
+    if prepared_batch is None:
+        return None
 
     artifact = prepare_batch_download(
         prepared_batch,
@@ -185,6 +193,26 @@ def _build_blast_url() -> str | None:
         "&LINK_LOC=blasthome"
         f"&QUERY={quote(query_text, safe='')}"
     )
+
+
+def _render_sidebar_download_popover() -> None:
+    prepared_batch = _prepare_active_batch()
+    if prepared_batch is None:
+        return
+
+    with st.popover(
+        "Export Sequences",
+        key=_SIDEBAR_DOWNLOAD_POPOVER_KEY,
+        width="stretch",
+        icon=":material/download:",
+    ):
+        render_batch_download_controls(
+            prepared_batch=prepared_batch,
+            key_prefix="abi_sauce.sidebar_download",
+            default_filename_stem="abi-sauce-trim",
+            button_label="Export Sequences",
+            compact=True,
+        )
 
 
 active_parsed_batch = get_active_parsed_batch(st.session_state)
@@ -214,6 +242,9 @@ with st.sidebar:
             _restart_session_dialog()
 
     if active_parsed_batch is not None and active_parsed_batch.parsed_records:
+        _render_sidebar_download_popover()
+
+        st.divider()
 
         blast_url = _build_blast_url()
         if blast_url is None:
