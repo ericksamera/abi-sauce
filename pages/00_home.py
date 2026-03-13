@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from abi_sauce.upload_state import get_active_parsed_batch
+from abi_sauce.demo_batch import can_load_demo_sample, load_demo_sample
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
 st.title("ABI Sauce")
@@ -25,6 +26,18 @@ if parsed_batch is None:
             ]
         )
     )
+
+    demo_available = can_load_demo_sample()
+
+    if st.button(
+        "Load demo sample",
+        disabled=not demo_available,
+    ):
+        load_demo_sample(st.session_state)
+        st.rerun()
+
+    if not demo_available:
+        st.caption("Demo sample unavailable: tests/fixtures/example.ab1 was not found.")
     st.stop()
 
 uploaded_count = len(parsed_batch.uploads)

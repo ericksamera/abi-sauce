@@ -55,13 +55,17 @@ def test_build_chromatogram_figure_adds_channel_base_and_quality_traces() -> Non
     assert [trace.name for trace in figure.data] == [
         "G trace",
         "A trace",
+        "Called peaks",
         "Base calls",
         "Quality scores",
     ]
-    assert figure.data[0].type == "scatter"
-    assert figure.data[1].type == "scatter"
-    assert figure.data[2].mode == "text"
-    assert figure.data[3].type == "bar"
+    assert figure.data[0].type == "scattergl"
+    assert figure.data[1].type == "scattergl"
+    assert figure.data[2].type == "scattergl"
+    assert figure.data[2].mode == "markers"
+    assert figure.data[3].type == "scattergl"
+    assert figure.data[3].mode == "text"
+    assert figure.data[4].type == "bar"
 
 
 def test_build_chromatogram_figure_omits_quality_trace_when_overlay_is_unavailable() -> (
@@ -72,6 +76,7 @@ def test_build_chromatogram_figure_omits_quality_trace_when_overlay_is_unavailab
     assert [trace.name for trace in figure.data] == [
         "G trace",
         "A trace",
+        "Called peaks",
         "Base calls",
     ]
     assert "yaxis2" not in figure.layout

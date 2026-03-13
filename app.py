@@ -23,6 +23,16 @@ _UPLOADER_KEY_PREFIX = "abi_sauce.active_batch_uploads"
 
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
+st.markdown(
+    """
+<style>
+section.stMain .block-container {
+    padding-top: 2rem;
+    z-index: 1;
+}
+</style>""",
+    unsafe_allow_html=True,
+)
 
 
 def _active_uploader_key() -> str:
@@ -60,7 +70,7 @@ def _activate_uploaded_files(uploaded_files: Sequence[UploadedFileLike]) -> None
 
 @st.dialog(
     "Load ABI trace files",
-    width="large",
+    width="small",
     on_dismiss="rerun",
 )
 def _upload_batch_dialog() -> None:

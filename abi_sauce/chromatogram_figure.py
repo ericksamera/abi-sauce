@@ -4,7 +4,7 @@ from typing import Final
 
 import plotly.graph_objects as go
 
-from abi_sauce.chromatogram import ChromatogramView
+from abi_sauce.chromatogram import ChromatogramBaseCall, ChromatogramView
 
 _DEFAULT_TRIM_MARKER_COLOR: Final[str] = "#666666"
 _DEFAULT_QUALITY_COLOR: Final[str] = "rgba(120, 120, 120, 0.35)"
@@ -22,27 +22,57 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
 
     for channel in view.channels:
         figure.add_trace(
-            go.Scatter(
+            go.Scattergl(
                 x=view.x_values,
                 y=channel.signal,
                 mode="lines",
                 name=f"{channel.base} trace",
                 line={"color": channel.color},
+                hoverinfo="skip",
+                hovertemplate=None,
+            )
+        )
+
+    called_peak_positions: list[int] = []
+    called_peak_heights: list[int] = []
+    called_peak_bases: list[str] = []
+    called_peak_colors: list[str] = []
+    for base_call in view.base_calls:
+        peak_height = _resolve_called_peak_height(view, base_call)
+        if peak_height is None:
+            continue
+        called_peak_positions.append(base_call.position)
+        called_peak_heights.append(peak_height)
+        called_peak_bases.append(base_call.base)
+        called_peak_colors.append(base_call.color)
+
+    if called_peak_positions:
+        figure.add_trace(
+            go.Scattergl(
+                x=called_peak_positions,
+                y=called_peak_heights,
+                mode="markers",
+                name="Called peaks",
+                showlegend=False,
+                customdata=called_peak_bases,
                 hovertemplate=(
-                    "sample=%{x}<br>signal=%{y}<extra>" + channel.base + "</extra>"
+                    "base=%{customdata}<br>sample=%{x}<br>signal=%{y}<extra></extra>"
                 ),
+                marker={
+                    "size": 10,
+                    "opacity": 0,
+                },
             )
         )
 
     figure.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=[base_call.position for base_call in view.base_calls],
             y=[base_label_y] * len(view.base_calls),
             text=[base_call.base for base_call in view.base_calls],
             mode="text",
             name="Base calls",
             hovertemplate="base=%{text}<br>sample=%{x}<extra></extra>",
-            cliponaxis=False,
         )
     )
 
@@ -143,3 +173,21 @@ def _initial_x_range(view: ChromatogramView) -> tuple[float, float]:
 
 def _clamp_x(value: float, *, view: ChromatogramView) -> float:
     return max(0.0, min(value, float(view.trace_length - 1)))
+
+
+def _resolve_called_peak_height(
+    view: ChromatogramView,
+    base_call: ChromatogramBaseCall,
+) -> int | None:
+    for channel in view.channels:
+        if channel.base == base_call.base and base_call.position < len(channel.signal):
+            return channel.signal[base_call.position]
+
+    fallback_heights = [
+        channel.signal[base_call.position]
+        for channel in view.channels
+        if base_call.position < len(channel.signal)
+    ]
+    if not fallback_heights:
+        return None
+    return max(fallback_heights)

@@ -79,18 +79,6 @@ if parsed_batch is None:
 parsed_records = parsed_batch.parsed_records
 parse_errors = parsed_batch.parse_errors
 
-st.write(
-    {
-        "uploaded_files": len(parsed_batch.uploads),
-        "parsed_files": len(parsed_records),
-        "failed_files": len(parse_errors),
-    }
-)
-
-if parse_errors:
-    with st.expander("Files that failed to parse"):
-        for filename, message in parse_errors.items():
-            st.error(f"{filename}: {message}")
 
 if not parsed_records:
     st.error("No ABI files could be parsed from this batch.")
@@ -104,6 +92,17 @@ viewer_state = sync_viewer_session_state(
 trim_state = viewer_state.trim_state
 record_names = list(parsed_records.keys())
 selected_record_name = viewer_state.selected_record_name or record_names[0]
+trim_scope = cast(
+    TrimScope,
+    st.session_state.get(_SAMPLE_TRIM_SCOPE_WIDGET_KEY, trim_state.trim_scope),
+)
+if trim_scope != trim_state.trim_scope:
+    trim_state = BatchTrimState(
+        trim_scope=trim_scope,
+        global_trim_config=trim_state.global_trim_config,
+        trim_configs_by_record=dict(trim_state.trim_configs_by_record),
+    )
+    set_batch_trim_state(st.session_state, trim_state)
 
 record_annotations = build_record_annotations(
     parsed_records.keys(),
@@ -112,7 +111,7 @@ record_annotations = build_record_annotations(
 selected_record_name = cast(
     str,
     st.selectbox(
-        "Selected record",
+        "Sample",
         options=record_names,
         index=record_names.index(selected_record_name),
         format_func=lambda filename: record_annotations.display_labels_by_record[
@@ -123,27 +122,6 @@ selected_record_name = cast(
 )
 set_selected_record_name(st.session_state, selected_record_name)
 record = parsed_records[selected_record_name]
-
-trim_scope = cast(
-    TrimScope,
-    st.radio(
-        "Shared trim application mode",
-        options=["selected", "all"],
-        format_func=lambda value: (
-            "Selected record override" if value == "selected" else "All parsed records"
-        ),
-        index=0 if trim_state.trim_scope == "selected" else 1,
-        horizontal=True,
-        key=_SAMPLE_TRIM_SCOPE_WIDGET_KEY,
-    ),
-)
-if trim_scope != trim_state.trim_scope:
-    trim_state = BatchTrimState(
-        trim_scope=trim_scope,
-        global_trim_config=trim_state.global_trim_config,
-        trim_configs_by_record=dict(trim_state.trim_configs_by_record),
-    )
-    set_batch_trim_state(st.session_state, trim_state)
 
 record_annotations = build_record_annotations(
     parsed_records.keys(),
@@ -163,7 +141,46 @@ if should_refresh_trim_form:
     _load_trim_config_into_form(active_form_trim_config)
     st.session_state[_SAMPLE_TRIM_FORM_SCOPE_KEY] = trim_scope
     st.session_state[_SAMPLE_TRIM_FORM_RECORD_NAME_KEY] = selected_record_name
+trim_state = get_batch_trim_state(st.session_state)
+resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
+prepared_batch = apply_trim_configs(
+    parsed_batch,
+    default_trim_config=resolved_trim_inputs.default_trim_config,
+    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+)
+trim_result = prepared_batch.trim_results[selected_record_name]
+effective_trim_config = resolve_active_trim_config(
+    trim_state,
+    selected_record_name=selected_record_name,
+)
+chromatogram_view = build_chromatogram_view(record, trim_result)
 
+if not chromatogram_view.is_renderable:
+    st.warning("Selected record does not have enough trace data to render a chart.")
+    st.write(
+        {
+            "render_failure_reason": chromatogram_view.render_failure_reason,
+        }
+    )
+else:
+    figure = build_chromatogram_figure(chromatogram_view)
+    figure.update_layout(
+        height=500,
+        margin={"l": 24, "r": 24, "t": 24, "b": 24},
+    )
+    st.plotly_chart(figure, width="stretch")
+
+st.subheader("Sample controls")
+st.radio(
+    "Shared trim application mode",
+    options=["selected", "all"],
+    format_func=lambda value: (
+        "Selected record override" if value == "selected" else "All parsed records"
+    ),
+    index=0 if trim_state.trim_scope == "selected" else 1,
+    horizontal=True,
+    key=_SAMPLE_TRIM_SCOPE_WIDGET_KEY,
+)
 st.caption(
     "In all-record mode, this form edits the shared batch trim config. In selected-record mode, applying a no-op config removes the override."
 )
@@ -215,21 +232,7 @@ with st.form("sample_viewer_trim_form"):
 
     st.form_submit_button("Apply shared trim", on_click=_apply_trim_form)
 
-trim_state = get_batch_trim_state(st.session_state)
-resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-prepared_batch = apply_trim_configs(
-    parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
-)
-trim_result = prepared_batch.trim_results[selected_record_name]
-effective_trim_config = resolve_active_trim_config(
-    trim_state,
-    selected_record_name=selected_record_name,
-)
-chromatogram_view = build_chromatogram_view(record, trim_result)
-
-st.subheader("Selected record detail")
+st.subheader("Sample details")
 metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
 with metric_col_1:
     st.metric("Original length", trim_result.original_length)
@@ -261,33 +264,32 @@ st.write(
 if not trim_result.passed_min_length:
     st.warning("Trimmed sequence did not meet the minimum length.")
 
-st.subheader("Chromatogram")
-if not chromatogram_view.is_renderable:
-    st.warning("Selected record does not have enough trace data to render a chart.")
+with st.expander("Chromatogram debug info"):
     st.write(
         {
-            "render_failure_reason": chromatogram_view.render_failure_reason,
+            "trace_length": chromatogram_view.trace_length,
+            "channels": [
+                f"{channel.data_key}:{channel.base}"
+                for channel in chromatogram_view.channels
+            ],
+            "base_calls": len(chromatogram_view.base_calls),
+            "quality_points": len(chromatogram_view.quality_points),
+            "left_trim_boundary": chromatogram_view.trim_boundaries.left,
+            "right_trim_boundary": chromatogram_view.trim_boundaries.right,
         }
     )
-else:
-    st.plotly_chart(
-        build_chromatogram_figure(chromatogram_view),
-        width="stretch",
+
+with st.expander("Batch/session info"):
+    st.write(
+        {
+            "uploaded_files": len(parsed_batch.uploads),
+            "parsed_files": len(parsed_records),
+            "failed_files": len(parse_errors),
+        }
     )
-    with st.expander("Chromatogram debug info"):
-        st.write(
-            {
-                "trace_length": chromatogram_view.trace_length,
-                "channels": [
-                    f"{channel.data_key}:{channel.base}"
-                    for channel in chromatogram_view.channels
-                ],
-                "base_calls": len(chromatogram_view.base_calls),
-                "quality_points": len(chromatogram_view.quality_points),
-                "left_trim_boundary": chromatogram_view.trim_boundaries.left,
-                "right_trim_boundary": chromatogram_view.trim_boundaries.right,
-            }
-        )
+    if parse_errors:
+        for filename, message in parse_errors.items():
+            st.error(f"{filename}: {message}")
 
 raw_col, trimmed_col = st.columns(2)
 with raw_col:
