@@ -30,6 +30,7 @@ def make_fake_bio_record(
     use_ploc2: bool = True,
     use_ploc1: bool = False,
     include_fwo_1: bool = True,
+    include_qc_scores: bool = True,
 ) -> FakeBioRecord:
     annotations: dict[str, Any] = {
         "machine_model": "SeqStudio",
@@ -51,6 +52,10 @@ def make_fake_bio_record(
             abif_raw["PLOC1"] = [101, 201, 301, 401, 501]
         if include_fwo_1:
             abif_raw["FWO_1"] = b"GATC\x00"
+        if include_qc_scores:
+            abif_raw["TrSc1"] = 31
+            abif_raw["PuSc1"] = 23
+            abif_raw["CRLn1"] = 456
 
         annotations["abif_raw"] = abif_raw
 
@@ -107,6 +112,9 @@ def test_parse_ab1_upload_returns_normalized_sequence_record(
 
     assert record.annotations["source_filename"] == "trace.ab1"
     assert record.annotations["machine_model"] == "SeqStudio"
+    assert record.annotations["trace_score"] == 31
+    assert record.annotations["pup_score"] == 23
+    assert record.annotations["crl_score"] == 456
 
 
 def test_extract_trace_data_returns_none_when_no_channels_present() -> None:
@@ -188,6 +196,22 @@ def test_extract_trace_data_succeeds_when_fwo_1_is_missing() -> None:
 
     assert trace_data is not None
     assert trace_data.channel_order is None
+
+
+def test_parse_ab1_upload_sets_missing_qc_metrics_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_seqio_read(
+        monkeypatch,
+        record=make_fake_bio_record(include_qc_scores=False),
+    )
+
+    upload = SequenceUpload(filename="trace.ab1", content=b"fake")
+    record = abi.parse_ab1_upload(upload)
+
+    assert record.annotations["trace_score"] is None
+    assert record.annotations["pup_score"] is None
+    assert record.annotations["crl_score"] is None
 
 
 def test_parse_ab1_upload_wraps_low_level_parse_errors(

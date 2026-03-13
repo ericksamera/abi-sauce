@@ -37,6 +37,7 @@ def _to_sequence_record(
     else:
         raw_annotations = {}
     qualities = _extract_qualities(bio_record)
+    qc_annotations = _extract_qc_annotations(raw_annotations)
     trace_data = _extract_trace_data(raw_annotations)
 
     return SequenceRecord(
@@ -53,8 +54,27 @@ def _to_sequence_record(
             "sample_well": bio_record.annotations.get("sample_well"),
             "run_start": bio_record.annotations.get("run_start"),
             "run_finish": bio_record.annotations.get("run_finish"),
+            **qc_annotations,
         },
     )
+
+
+def _extract_qc_annotations(raw_annotations: dict[str, Any]) -> dict[str, int | None]:
+    """Extract optional ABI QC summary metrics from raw annotations."""
+    return {
+        "trace_score": _optional_int(raw_annotations.get("TrSc1")),
+        "pup_score": _optional_int(raw_annotations.get("PuSc1")),
+        "crl_score": _optional_int(raw_annotations.get("CRLn1")),
+    }
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_qualities(bio_record: BioSeqRecord) -> list[int] | None:
