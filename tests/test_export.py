@@ -47,6 +47,13 @@ def test_to_fasta_wraps_sequence() -> None:
     assert result == ">trace_001\nACGT\nACGT\nAC\n"
 
 
+def test_to_fasta_supports_two_line_output() -> None:
+    record = make_record(sequence="ACGTACGTAC")
+    result = to_fasta(record, line_width=None)
+
+    assert result == ">trace_001\nACGTACGTAC\n"
+
+
 def test_to_fasta_rejects_invalid_line_width() -> None:
     record = make_record()
 

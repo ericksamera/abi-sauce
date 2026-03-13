@@ -37,11 +37,14 @@ class ChromatogramBaseCall:
 
 
 @dataclass(frozen=True, slots=True)
-class ChromatogramQualityPoint:
-    """One per-base quality score aligned to a chromatogram position."""
+class ChromatogramQualitySegment:
+    """One per-base quality score rendered across a chromatogram span."""
 
     base_index: int
-    position: int
+    left: float
+    right: float
+    center: float
+    width: float
     quality: int
 
 
@@ -62,7 +65,7 @@ class ChromatogramView:
     x_values: tuple[int, ...] = ()
     channels: tuple[ChromatogramChannel, ...] = ()
     base_calls: tuple[ChromatogramBaseCall, ...] = ()
-    quality_points: tuple[ChromatogramQualityPoint, ...] = ()
+    quality_segments: tuple[ChromatogramQualitySegment, ...] = ()
     trim_boundaries: ChromatogramTrimBoundaries = field(
         default_factory=ChromatogramTrimBoundaries
     )
@@ -75,7 +78,7 @@ class ChromatogramView:
     @property
     def has_quality_overlay(self) -> bool:
         """Return whether quality markers are available for plotting."""
-        return bool(self.quality_points)
+        return bool(self.quality_segments)
 
 
 def build_chromatogram_view(
@@ -119,7 +122,11 @@ def build_chromatogram_view(
         base_positions=trace_data.base_positions,
         trace_length=trace_length,
     )
-    quality_points = _build_quality_points(record.qualities, base_calls)
+    quality_segments = _build_quality_segments(
+        record.qualities,
+        base_calls,
+        trace_length=trace_length,
+    )
     trim_boundaries = _resolve_trim_boundaries(
         trim_result=trim_result,
         base_calls=base_calls,
@@ -131,7 +138,7 @@ def build_chromatogram_view(
         x_values=x_values,
         channels=sanitized_channels,
         base_calls=base_calls,
-        quality_points=quality_points,
+        quality_segments=quality_segments,
         trim_boundaries=trim_boundaries,
     )
 
@@ -202,27 +209,81 @@ def _build_base_calls(
     return tuple(base_calls)
 
 
-def _build_quality_points(
+def _build_quality_segments(
     qualities: list[int] | None,
     base_calls: tuple[ChromatogramBaseCall, ...],
-) -> tuple[ChromatogramQualityPoint, ...]:
-    if qualities is None:
+    *,
+    trace_length: int,
+) -> tuple[ChromatogramQualitySegment, ...]:
+    if qualities is None or not base_calls:
         return ()
 
-    quality_points: list[ChromatogramQualityPoint] = []
-    for base_call in base_calls:
+    positions = tuple(base_call.position for base_call in base_calls)
+    quality_segments: list[ChromatogramQualitySegment] = []
+    for position_index, base_call in enumerate(base_calls):
         if base_call.base_index >= len(qualities):
             break
 
-        quality_points.append(
-            ChromatogramQualityPoint(
+        left = _quality_left_edge(
+            positions,
+            position_index=position_index,
+            trace_length=trace_length,
+        )
+        right = _quality_right_edge(
+            positions,
+            position_index=position_index,
+            trace_length=trace_length,
+        )
+        width = max(right - left, 0.0)
+        if width <= 0:
+            continue
+
+        quality_segments.append(
+            ChromatogramQualitySegment(
                 base_index=base_call.base_index,
-                position=base_call.position,
+                left=left,
+                right=right,
+                center=_midpoint(left, right),
+                width=width,
                 quality=int(qualities[base_call.base_index]),
             )
         )
 
-    return tuple(quality_points)
+    return tuple(quality_segments)
+
+
+def _quality_left_edge(
+    positions: tuple[int, ...],
+    *,
+    position_index: int,
+    trace_length: int,
+) -> float:
+    if position_index <= 0:
+        return _clamp_boundary(
+            _extrapolated_left_edge(positions),
+            trace_length=trace_length,
+        )
+    return _clamp_boundary(
+        _midpoint(positions[position_index - 1], positions[position_index]),
+        trace_length=trace_length,
+    )
+
+
+def _quality_right_edge(
+    positions: tuple[int, ...],
+    *,
+    position_index: int,
+    trace_length: int,
+) -> float:
+    if position_index >= len(positions) - 1:
+        return _clamp_boundary(
+            _extrapolated_right_edge(positions),
+            trace_length=trace_length,
+        )
+    return _clamp_boundary(
+        _midpoint(positions[position_index], positions[position_index + 1]),
+        trace_length=trace_length,
+    )
 
 
 def _resolve_trim_boundaries(
@@ -297,7 +358,7 @@ def _right_trim_boundary(
     )
 
 
-def _midpoint(left: int, right: int) -> float:
+def _midpoint(left: float, right: float) -> float:
     return (left + right) / 2.0
 
 

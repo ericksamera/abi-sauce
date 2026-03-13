@@ -97,6 +97,20 @@ def set_active_parsed_batch(
     )
 
 
+def merge_uploads(
+    existing_uploads: Iterable[SequenceUpload],
+    incoming_uploads: Iterable[SequenceUpload],
+) -> tuple[SequenceUpload, ...]:
+    """Return a deterministic filename-keyed merge of existing and incoming uploads."""
+    uploads_by_filename = {upload.filename: upload for upload in existing_uploads}
+    for upload in incoming_uploads:
+        uploads_by_filename[upload.filename] = upload
+
+    return tuple(
+        uploads_by_filename[filename] for filename in sorted(uploads_by_filename)
+    )
+
+
 def clear_active_batch(session_state: SessionStateWriter) -> None:
     """Remove all active upload/parse state from the session mapping."""
     session_state.pop(_ACTIVE_UPLOADS_SESSION_KEY, None)

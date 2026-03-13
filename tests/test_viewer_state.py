@@ -115,7 +115,7 @@ def test_sync_viewer_session_state_prunes_stale_selection_and_overrides() -> Non
 
 def test_sync_viewer_session_state_resets_trim_state_when_batch_changes() -> None:
     first_signature = make_signature("a.ab1", "b.ab1")
-    second_signature = make_signature("c.ab1")
+    second_signature = make_signature("a.ab1", "b.ab1", "c.ab1")
     session_state: dict[str, object] = {}
 
     sync_viewer_session_state(
@@ -128,6 +128,7 @@ def test_sync_viewer_session_state_resets_trim_state_when_batch_changes() -> Non
         session_state,
         BatchTrimState(
             trim_scope="selected",
+            global_trim_config=TrimConfig(right_trim=1),
             trim_configs_by_record={"b.ab1": TrimConfig(left_trim=2)},
         ),
     )
@@ -135,12 +136,16 @@ def test_sync_viewer_session_state_resets_trim_state_when_batch_changes() -> Non
     viewer_state = sync_viewer_session_state(
         session_state,
         batch_signature=second_signature,
-        parsed_record_names=("c.ab1",),
+        parsed_record_names=("a.ab1", "b.ab1", "c.ab1"),
     )
 
     assert viewer_state.batch_signature == second_signature
-    assert viewer_state.selected_record_name == "c.ab1"
-    assert viewer_state.trim_state == BatchTrimState()
+    assert viewer_state.selected_record_name == "b.ab1"
+    assert viewer_state.trim_state == BatchTrimState(
+        trim_scope="selected",
+        global_trim_config=TrimConfig(right_trim=1),
+        trim_configs_by_record={"b.ab1": TrimConfig(left_trim=2)},
+    )
 
 
 def test_clear_viewer_session_state_removes_shared_entries() -> None:

@@ -52,7 +52,7 @@ def test_build_chromatogram_view_returns_not_renderable_without_trace_data() -> 
     assert view.render_failure_reason == "missing_trace_data"
     assert view.channels == ()
     assert view.base_calls == ()
-    assert view.quality_points == ()
+    assert view.quality_segments == ()
 
 
 def test_build_chromatogram_view_renders_traces_and_base_calls_without_qualities() -> (
@@ -72,11 +72,11 @@ def test_build_chromatogram_view_renders_traces_and_base_calls_without_qualities
     assert tuple(channel.base for channel in view.channels) == ("G", "A", "T", "C")
     assert tuple(base_call.base for base_call in view.base_calls) == tuple("ACGT")
     assert tuple(base_call.position for base_call in view.base_calls) == (1, 3, 5, 7)
-    assert view.quality_points == ()
+    assert view.quality_segments == ()
     assert view.has_quality_overlay is False
 
 
-def test_build_chromatogram_view_aligns_quality_points_to_base_positions() -> None:
+def test_build_chromatogram_view_builds_quality_segments_from_peak_midpoints() -> None:
     view = build_chromatogram_view(
         make_record(
             sequence="ACGT",
@@ -85,8 +85,36 @@ def test_build_chromatogram_view_aligns_quality_points_to_base_positions() -> No
         )
     )
 
-    assert tuple(point.position for point in view.quality_points) == (2, 4, 6, 8)
-    assert tuple(point.quality for point in view.quality_points) == (40, 32, 18, 9)
+    assert tuple(segment.left for segment in view.quality_segments) == (
+        1.0,
+        3.0,
+        5.0,
+        7.0,
+    )
+    assert tuple(segment.right for segment in view.quality_segments) == (
+        3.0,
+        5.0,
+        7.0,
+        9.0,
+    )
+    assert tuple(segment.center for segment in view.quality_segments) == (
+        2.0,
+        4.0,
+        6.0,
+        8.0,
+    )
+    assert tuple(segment.width for segment in view.quality_segments) == (
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+    )
+    assert tuple(segment.quality for segment in view.quality_segments) == (
+        40,
+        32,
+        18,
+        9,
+    )
     assert view.has_quality_overlay is True
 
 
@@ -157,7 +185,8 @@ def test_build_chromatogram_view_sanitizes_channel_lengths_and_out_of_range_posi
     assert view.trace_length == 6
     assert tuple(len(channel.signal) for channel in view.channels) == (6, 6, 6, 6)
     assert tuple(base_call.position for base_call in view.base_calls) == (1, 3, 5)
-    assert tuple(point.position for point in view.quality_points) == (1, 3, 5)
+    assert tuple(segment.left for segment in view.quality_segments) == (0.0, 2.0, 4.0)
+    assert tuple(segment.right for segment in view.quality_segments) == (2.0, 4.0, 5.0)
 
 
 def test_build_chromatogram_view_keeps_renderable_trace_when_trim_fails_min_length() -> (

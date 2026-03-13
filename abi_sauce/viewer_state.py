@@ -31,6 +31,14 @@ class ViewerSessionState:
 
 def read_viewer_session_state(session_state: SessionStateReader) -> ViewerSessionState:
     """Read the shared viewer state from session storage."""
+    missing = object()
+    default_trim_state = BatchTrimState()
+    raw_global_trim_config = session_state.get(_GLOBAL_TRIM_CONFIG_SESSION_KEY, missing)
+    global_trim_config = (
+        default_trim_state.global_trim_config
+        if raw_global_trim_config is missing
+        else _coerce_trim_config(raw_global_trim_config)
+    )
     return ViewerSessionState(
         batch_signature=_coerce_batch_signature(
             session_state.get(_VIEWER_BATCH_SIGNATURE_SESSION_KEY)
@@ -40,9 +48,7 @@ def read_viewer_session_state(session_state: SessionStateReader) -> ViewerSessio
         ),
         trim_state=BatchTrimState(
             trim_scope=_coerce_trim_scope(session_state.get(_TRIM_SCOPE_SESSION_KEY)),
-            global_trim_config=_coerce_trim_config(
-                session_state.get(_GLOBAL_TRIM_CONFIG_SESSION_KEY)
-            ),
+            global_trim_config=global_trim_config,
             trim_configs_by_record=_coerce_trim_configs_by_record(
                 session_state.get(_TRIM_CONFIGS_BY_RECORD_SESSION_KEY)
             ),
@@ -56,19 +62,10 @@ def sync_viewer_session_state(
     batch_signature: BatchSignature,
     parsed_record_names: Iterable[str],
 ) -> ViewerSessionState:
-    """Reset or sanitize the shared viewer state for the current parsed batch."""
+    """Sanitize the shared viewer state for the current parsed batch."""
     record_names = tuple(parsed_record_names)
     first_record_name = record_names[0] if record_names else None
     current_state = read_viewer_session_state(session_state)
-
-    if current_state.batch_signature != batch_signature:
-        next_state = ViewerSessionState(
-            batch_signature=batch_signature,
-            selected_record_name=first_record_name,
-            trim_state=BatchTrimState(),
-        )
-        write_viewer_session_state(session_state, next_state)
-        return next_state
 
     selected_record_name = (
         current_state.selected_record_name

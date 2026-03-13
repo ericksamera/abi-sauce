@@ -8,13 +8,19 @@ from abi_sauce.trimming import TrimConfig
 
 TrimScope = Literal["all", "selected"]
 
+DEFAULT_BATCH_TRIM_CONFIG = TrimConfig(
+    quality_trim_enabled=True,
+    error_probability_cutoff=0.01,
+    min_length=25,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class BatchTrimState:
     """Pure UI-level trimming state for batch pages."""
 
     trim_scope: TrimScope = "all"
-    global_trim_config: TrimConfig | None = None
+    global_trim_config: TrimConfig | None = DEFAULT_BATCH_TRIM_CONFIG
     trim_configs_by_record: Mapping[str, TrimConfig] = field(default_factory=dict)
 
 
@@ -42,7 +48,11 @@ def resolve_batch_trim_inputs(
     """Resolve the effective batch trim inputs for the current UI state."""
     if trim_state.trim_scope == "all":
         return ResolvedBatchTrimInputs(
-            default_trim_config=trim_state.global_trim_config,
+            default_trim_config=(
+                trim_state.global_trim_config
+                if trim_state.global_trim_config is not None
+                else DEFAULT_BATCH_TRIM_CONFIG
+            ),
         )
 
     return ResolvedBatchTrimInputs(
@@ -120,9 +130,16 @@ def resolve_active_trim_config(
 ) -> TrimConfig:
     """Resolve the trim config that should currently hydrate the form."""
     if trim_state.trim_scope == "all":
-        return trim_state.global_trim_config or TrimConfig()
+        return (
+            trim_state.global_trim_config
+            if trim_state.global_trim_config is not None
+            else DEFAULT_BATCH_TRIM_CONFIG
+        )
 
-    return trim_state.trim_configs_by_record.get(selected_record_name, TrimConfig())
+    return trim_state.trim_configs_by_record.get(
+        selected_record_name,
+        TrimConfig(),
+    )
 
 
 def _normalize_trim_config(config: TrimConfig) -> TrimConfig | None:

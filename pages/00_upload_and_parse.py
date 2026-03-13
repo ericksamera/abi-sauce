@@ -9,6 +9,7 @@ from abi_sauce.exceptions import ExportError
 from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
 from abi_sauce.trim_state import (
     BatchTrimState,
+    DEFAULT_BATCH_TRIM_CONFIG,
     TrimScope,
     build_record_annotations,
     resolve_batch_trim_inputs,
@@ -51,15 +52,11 @@ def _trim_config_from_form() -> TrimConfig:
     )
 
 
-def _normalize_trim_config(config: TrimConfig) -> TrimConfig | None:
-    return None if config == TrimConfig() else config
-
-
 def _apply_global_trim_form() -> None:
     current_trim_state = get_batch_trim_state(st.session_state)
     updated_trim_state = BatchTrimState(
         trim_scope=current_trim_state.trim_scope,
-        global_trim_config=_normalize_trim_config(_trim_config_from_form()),
+        global_trim_config=_trim_config_from_form(),
         trim_configs_by_record=dict(current_trim_state.trim_configs_by_record),
     )
     from abi_sauce.viewer_state import set_batch_trim_state
@@ -128,7 +125,11 @@ record_annotations = build_record_annotations(
     trim_state.trim_configs_by_record,
 )
 
-current_global_trim_config = trim_state.global_trim_config or TrimConfig()
+current_global_trim_config = (
+    trim_state.global_trim_config
+    if trim_state.global_trim_config is not None
+    else DEFAULT_BATCH_TRIM_CONFIG
+)
 should_refresh_trim_form = (
     st.session_state.get(_BATCH_TRIM_FORM_SCOPE_KEY) != trim_scope
     or st.session_state.get(_BATCH_TRIM_FORM_GLOBAL_CONFIG_KEY)

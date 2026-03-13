@@ -37,6 +37,7 @@ _SAMPLE_TRIM_FORM_RECORD_NAME_KEY = "sample_viewer.trim_form_record_name"
 
 st.set_page_config(page_title="Sample Viewer", layout="wide")
 
+
 def _load_trim_config_into_form(config: TrimConfig) -> None:
     st.session_state[_SAMPLE_TRIM_LEFT_KEY] = config.left_trim
     st.session_state[_SAMPLE_TRIM_RIGHT_KEY] = config.right_trim
@@ -268,7 +269,7 @@ with st.expander("Chromatogram debug info"):
                 for channel in chromatogram_view.channels
             ],
             "base_calls": len(chromatogram_view.base_calls),
-            "quality_points": len(chromatogram_view.quality_points),
+            "quality_segments": len(chromatogram_view.quality_segments),
             "left_trim_boundary": chromatogram_view.trim_boundaries.left,
             "right_trim_boundary": chromatogram_view.trim_boundaries.right,
         }

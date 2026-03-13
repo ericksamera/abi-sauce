@@ -219,6 +219,27 @@ def test_prepare_batch_download_builds_fastq_artifact() -> None:
     assert artifact.data == "@trace_a\nCGTA\n+\nJKLM\n"
 
 
+def test_prepare_batch_download_supports_unwrapped_fasta_output() -> None:
+    prepared_batch = batch_service.apply_trim_config(
+        make_parsed_batch(),
+        TrimConfig(min_length=1),
+    )
+
+    artifact = batch_service.prepare_batch_download(
+        prepared_batch,
+        export_format="fasta",
+        concatenate_batch=True,
+        filename_stem="blast-batch",
+        require_min_length=True,
+        fasta_line_width=None,
+    )
+
+    assert artifact.is_downloadable is True
+    assert artifact.filename == "blast-batch.fasta"
+    assert artifact.mime == "text/plain"
+    assert artifact.data == ">trace_a\nACGTAC\n>trace_b\nACGT\n"
+
+
 def test_prepare_batch_download_builds_zip_artifact() -> None:
     prepared_batch = batch_service.apply_trim_config(
         make_parsed_batch(),

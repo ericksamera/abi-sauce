@@ -5,7 +5,7 @@ import pytest
 from abi_sauce.chromatogram import (
     ChromatogramBaseCall,
     ChromatogramChannel,
-    ChromatogramQualityPoint,
+    ChromatogramQualitySegment,
     ChromatogramTrimBoundaries,
     ChromatogramView,
 )
@@ -35,16 +35,30 @@ def make_view(
         ChromatogramBaseCall(base_index=0, base="A", position=1, color="green"),
         ChromatogramBaseCall(base_index=1, base="C", position=3, color="blue"),
     )
-    quality_points = (
-        ChromatogramQualityPoint(base_index=0, position=1, quality=40),
-        ChromatogramQualityPoint(base_index=1, position=3, quality=28),
+    quality_segments = (
+        ChromatogramQualitySegment(
+            base_index=0,
+            left=0.0,
+            right=2.0,
+            center=1.0,
+            width=2.0,
+            quality=40,
+        ),
+        ChromatogramQualitySegment(
+            base_index=1,
+            left=2.0,
+            right=4.0,
+            center=3.0,
+            width=2.0,
+            quality=28,
+        ),
     )
     return ChromatogramView(
         is_renderable=True,
         x_values=(0, 1, 2, 3, 4),
         channels=channels,
         base_calls=base_calls,
-        quality_points=quality_points if include_quality else (),
+        quality_segments=quality_segments if include_quality else (),
         trim_boundaries=trim_boundaries or ChromatogramTrimBoundaries(),
     )
 
@@ -66,6 +80,8 @@ def test_build_chromatogram_figure_adds_channel_base_and_quality_traces() -> Non
     assert figure.data[3].type == "scattergl"
     assert figure.data[3].mode == "text"
     assert figure.data[4].type == "bar"
+    assert tuple(figure.data[4].x) == (1.0, 3.0)
+    assert tuple(figure.data[4].width) == (2.0, 2.0)
 
 
 def test_build_chromatogram_figure_omits_quality_trace_when_overlay_is_unavailable() -> (
@@ -125,7 +141,7 @@ def test_build_chromatogram_figure_sets_trim_aware_initial_x_range() -> None:
                     color="blue",
                 ),
             ),
-            quality_points=(),
+            quality_segments=(),
             trim_boundaries=ChromatogramTrimBoundaries(left=25.0, right=75.0),
         )
     )

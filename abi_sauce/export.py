@@ -9,9 +9,9 @@ from abi_sauce.exceptions import ExportError
 from abi_sauce.models import SequenceRecord
 
 
-def to_fasta(record: SequenceRecord, *, line_width: int = 80) -> str:
+def to_fasta(record: SequenceRecord, *, line_width: int | None = 80) -> str:
     """Serialize a sequence record as FASTA text."""
-    if line_width <= 0:
+    if line_width is not None and line_width <= 0:
         raise ValueError("line_width must be > 0")
 
     header = _header_for_record(record)
@@ -40,7 +40,7 @@ def to_fastq(record: SequenceRecord) -> str:
 def to_fasta_batch(
     records: Iterable[SequenceRecord],
     *,
-    line_width: int = 80,
+    line_width: int | None = 80,
 ) -> str:
     """Serialize multiple sequence records into one FASTA string."""
     return "".join(to_fasta(record, line_width=line_width) for record in records)
@@ -55,7 +55,7 @@ def to_zip_batch(
     records: Iterable[SequenceRecord],
     *,
     export_format: Literal["fasta", "fastq"],
-    line_width: int = 80,
+    line_width: int | None = 80,
 ) -> bytes:
     """Serialize records into a ZIP of per-record FASTA/FASTQ files."""
     with BytesIO() as file_buffer:
@@ -91,7 +91,7 @@ def _serialize_record(
     record: SequenceRecord,
     *,
     export_format: Literal["fasta", "fastq"],
-    line_width: int = 80,
+    line_width: int | None = 80,
 ) -> str:
     """Serialize a single record in the requested format."""
     if export_format == "fasta":
@@ -115,10 +115,13 @@ def _safe_filename(value: str) -> str:
     ).strip("._-")
 
 
-def _wrap_sequence(sequence: str, line_width: int) -> str:
+def _wrap_sequence(sequence: str, line_width: int | None) -> str:
     """Wrap a sequence string to a fixed width for FASTA output."""
     if not sequence:
         return ""
+
+    if line_width is None:
+        return sequence
 
     return "\n".join(
         sequence[index : index + line_width]

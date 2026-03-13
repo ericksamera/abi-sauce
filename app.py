@@ -14,6 +14,8 @@ from abi_sauce.upload_state import (
     clear_active_batch,
     get_active_batch_signature,
     get_active_parsed_batch,
+    get_active_uploads,
+    merge_uploads,
     set_active_parsed_batch,
 )
 from abi_sauce.viewer_state import clear_viewer_session_state
@@ -52,14 +54,46 @@ def _clear_active_batch_and_uploader() -> None:
     _bump_uploader_nonce()
 
 
+@st.dialog(
+    "Restart session",
+    width="small",
+    on_dismiss="rerun",
+)
+def _restart_session_dialog() -> None:
+    st.error(
+        "This will clear the active batch, selected sample, and shared trim/viewer state."
+    )
+
+    confirm_col, cancel_col = st.columns(2)
+
+    with confirm_col:
+        confirm_clicked = st.button(
+            "Confirm restart",
+            type="primary",
+            use_container_width=True,
+        )
+
+    with cancel_col:
+        cancel_clicked = st.button(
+            "Cancel",
+            use_container_width=True,
+        )
+
+    if cancel_clicked:
+        st.rerun()
+
+    if confirm_clicked:
+        _clear_active_batch_and_uploader()
+        st.rerun()
+
+
 def _activate_uploaded_files(uploaded_files: Sequence[UploadedFileLike]) -> None:
-    uploads = normalize_uploaded_files(uploaded_files)
+    uploads = merge_uploads(
+        get_active_uploads(st.session_state),
+        normalize_uploaded_files(uploaded_files),
+    )
     next_signature = build_batch_signature(uploads)
-    active_parsed_batch = get_active_parsed_batch(st.session_state)
-    if (
-        active_parsed_batch is not None
-        and next_signature == get_active_batch_signature(st.session_state)
-    ):
+    if next_signature == get_active_batch_signature(st.session_state):
         _bump_uploader_nonce()
         return
 
@@ -75,7 +109,7 @@ def _activate_uploaded_files(uploaded_files: Sequence[UploadedFileLike]) -> None
 )
 def _upload_batch_dialog() -> None:
     st.caption(
-        "Load a shared active batch for the Home, Sample Viewer, and Batch Viewer pages."
+        "Load ABI trace files into the shared session batch. New filenames are appended; reloading the same filename replaces that entry."
     )
     uploaded_files = st.file_uploader(
         "Choose one or more ABI trace files",
@@ -83,18 +117,18 @@ def _upload_batch_dialog() -> None:
         accept_multiple_files=True,
         key=_active_uploader_key(),
     )
-    if uploaded_files:
-        st.write(
-            {
-                "selected_files": len(uploaded_files),
-                "filenames": [uploaded_file.name for uploaded_file in uploaded_files],
-            }
-        )
+    # if uploaded_files:
+    #     st.write(
+    #         {
+    #             "selected_files": len(uploaded_files),
+    #             "filenames": [uploaded_file.name for uploaded_file in uploaded_files],
+    #         }
+    #     )
 
     load_col, cancel_col = st.columns(2)
     with load_col:
         load_clicked = st.button(
-            "Load batch",
+            "Add to session",
             type="primary",
             use_container_width=True,
             disabled=not uploaded_files,
@@ -121,34 +155,47 @@ st.sidebar.caption(
     "Use the shared active batch across Home, Sample Viewer, and Batch Viewer."
 )
 
-load_button_label = (
-    "Load ABI files" if active_parsed_batch is None else "Replace active batch"
-)
-if st.sidebar.button(load_button_label, type="primary", use_container_width=True):
-    _upload_batch_dialog()
+load_button_label = "Upload files" if active_parsed_batch is None else "Upload files"
+with st.sidebar:
+    col_import, col_reset = st.columns([4, 1], border=False)
 
-if st.sidebar.button(
-    "Clear active batch",
-    use_container_width=True,
-    disabled=active_parsed_batch is None,
-):
-    _clear_active_batch_and_uploader()
-    st.rerun()
+    with col_import:
+        if st.button(load_button_label, use_container_width=True):
+            _upload_batch_dialog()
+
+    with col_reset:
+        if st.button(
+            "",
+            type="primary",
+            key="clear_batch",
+            icon=":material/restart_alt:",
+            use_container_width=True,
+            disabled=active_parsed_batch is None,
+        ):
+            _restart_session_dialog()
+
+pages = [
+    st.Page("pages/00_home.py", title="Home", icon=":material/home:"),
+]
+
+if active_parsed_batch is not None and active_parsed_batch.parsed_records:
+    pages.extend(
+        [
+            st.Page(
+                "pages/01_chromatogram_preview.py",
+                title="Sample Viewer",
+                icon=":material/biotech:",
+            ),
+            st.Page(
+                "pages/00_upload_and_parse.py",
+                title="Batch Viewer",
+                icon=":material/view_list:",
+            ),
+        ]
+    )
 
 navigation = st.navigation(
-    [
-        st.Page("pages/00_home.py", title="Home", icon=":material/home:"),
-        st.Page(
-            "pages/01_chromatogram_preview.py",
-            title="Sample Viewer",
-            icon=":material/biotech:",
-        ),
-        st.Page(
-            "pages/00_upload_and_parse.py",
-            title="Batch Viewer",
-            icon=":material/view_list:",
-        ),
-    ],
+    pages,
     position="top",
 )
 

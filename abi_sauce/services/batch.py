@@ -211,6 +211,7 @@ def prepare_batch_download(
     concatenate_batch: bool,
     filename_stem: str,
     require_min_length: bool = False,
+    fasta_line_width: int | None = 80,
 ) -> BatchDownloadArtifact:
     """Build one batch download artifact for the current export selection."""
     export_selection = select_batch_export(
@@ -233,6 +234,7 @@ def prepare_batch_download(
         export_format=export_format,
         concatenate_batch=concatenate_batch,
         filename_stem=filename_stem,
+        fasta_line_width=fasta_line_width,
     )
 
     return BatchDownloadArtifact(
@@ -253,13 +255,14 @@ def _serialize_batch_download(
     export_format: ExportFormat,
     concatenate_batch: bool,
     filename_stem: str,
+    fasta_line_width: int | None = 80,
 ) -> tuple[str | bytes, str, str]:
     """Serialize the current eligible batch export selection."""
     normalized_filename_stem = filename_stem.strip() or "abi-sauce-batch"
 
     if concatenate_batch and export_format == "fasta":
         return (
-            to_fasta_batch(records),
+            to_fasta_batch(records, line_width=fasta_line_width),
             f"{normalized_filename_stem}.fasta",
             "text/plain",
         )
@@ -272,7 +275,11 @@ def _serialize_batch_download(
         )
 
     return (
-        to_zip_batch(records, export_format=export_format),
+        to_zip_batch(
+            records,
+            export_format=export_format,
+            line_width=fasta_line_width,
+        ),
         f"{normalized_filename_stem}.zip",
         "application/zip",
     )

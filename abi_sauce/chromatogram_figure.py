@@ -79,12 +79,21 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
     if view.has_quality_overlay:
         figure.add_trace(
             go.Bar(
-                x=[point.position for point in view.quality_points],
-                y=[point.quality for point in view.quality_points],
+                x=[segment.center for segment in view.quality_segments],
+                y=[segment.quality for segment in view.quality_segments],
+                width=[segment.width for segment in view.quality_segments],
+                customdata=[
+                    [segment.left, segment.right] for segment in view.quality_segments
+                ],
                 name="Quality scores",
                 yaxis="y2",
                 marker={"color": _DEFAULT_QUALITY_COLOR},
-                hovertemplate="sample=%{x}<br>quality=%{y}<extra></extra>",
+                hovertemplate=(
+                    "left=%{customdata[0]:.1f}"
+                    "<br>right=%{customdata[1]:.1f}"
+                    "<br>quality=%{y}"
+                    "<extra></extra>"
+                ),
             )
         )
 
@@ -122,7 +131,7 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
     )
 
     if view.has_quality_overlay:
-        max_quality = max(point.quality for point in view.quality_points)
+        max_quality = max(segment.quality for segment in view.quality_segments)
         figure.update_layout(
             yaxis2={
                 "title": "PHRED quality",

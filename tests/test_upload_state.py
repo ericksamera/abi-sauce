@@ -9,6 +9,7 @@ from abi_sauce.upload_state import (
     get_active_batch_signature,
     get_active_parsed_batch,
     get_active_uploads,
+    merge_uploads,
     read_active_batch_state,
     set_active_parsed_batch,
     set_active_uploads,
@@ -112,6 +113,28 @@ def test_set_active_uploads_rejects_mismatched_parsed_batch() -> None:
             (make_upload("different.ab1", b"zz"),),
             parsed_batch=parsed_batch,
         )
+
+
+def test_merge_uploads_appends_new_files_and_replaces_name_collisions() -> None:
+    merged_uploads = merge_uploads(
+        (
+            make_upload("a.ab1", b"old-a"),
+            make_upload("b.ab1", b"old-b"),
+        ),
+        (
+            make_upload("b.ab1", b"new-b"),
+            make_upload("c.ab1", b"new-c"),
+        ),
+    )
+
+    assert tuple(upload.filename for upload in merged_uploads) == (
+        "a.ab1",
+        "b.ab1",
+        "c.ab1",
+    )
+    assert merged_uploads[0].content == b"old-a"
+    assert merged_uploads[1].content == b"new-b"
+    assert merged_uploads[2].content == b"new-c"
 
 
 def test_clear_active_batch_removes_all_session_entries() -> None:

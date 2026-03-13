@@ -27,7 +27,8 @@ def _build_blast_url() -> str | None:
         export_format="fasta",
         concatenate_batch=True,
         filename_stem="abi-sauce-batch",
-        require_min_length=False,  # flip to True if you want to drop min-length failures
+        require_min_length=True,
+        fasta_line_width=None,
     )
     if not artifact.is_downloadable or not isinstance(artifact.data, str):
         return None
@@ -130,8 +131,10 @@ st.subheader("BLAST")
 
 blast_url = _build_blast_url()
 if blast_url is None:
-    st.caption("No trimmed sequences available for BLAST.")
-elif len(blast_url) > 6000:
+    st.caption(
+        "No trimmed sequences meeting the minimum-length requirement are available for BLAST."
+    )
+elif len(blast_url) > 60_000:
     st.caption(
         "Batch is too large for a reliable BLAST URL; export FASTA and paste/upload it in BLAST instead."
     )
