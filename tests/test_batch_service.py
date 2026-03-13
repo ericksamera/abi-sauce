@@ -125,6 +125,33 @@ def make_parsed_batch() -> batch_service.ParsedBatch:
     )
 
 
+def test_apply_trim_configs_supports_per_record_configs() -> None:
+    prepared_batch = batch_service.apply_trim_configs(
+        make_parsed_batch(),
+        trim_configs_by_name={
+            "a.ab1": TrimConfig(left_trim=2),
+        },
+    )
+
+    assert prepared_batch.trim_results["a.ab1"].record.sequence == "GTAC"
+    assert prepared_batch.trim_results["b.ab1"].record.sequence == "ACGT"
+
+
+def test_apply_trim_configs_supports_default_config_with_per_record_override() -> None:
+    prepared_batch = batch_service.apply_trim_configs(
+        make_parsed_batch(),
+        default_trim_config=TrimConfig(left_trim=1),
+        trim_configs_by_name={
+            "b.ab1": TrimConfig(right_trim=1, min_length=4),
+        },
+    )
+
+    assert prepared_batch.trim_results["a.ab1"].record.sequence == "CGTAC"
+    assert prepared_batch.trim_results["b.ab1"].record.sequence == "ACG"
+    assert prepared_batch.trim_results["a.ab1"].passed_min_length is True
+    assert prepared_batch.trim_results["b.ab1"].passed_min_length is False
+
+
 def test_apply_trim_config_builds_prepared_batch() -> None:
     parsed_batch = make_parsed_batch()
 

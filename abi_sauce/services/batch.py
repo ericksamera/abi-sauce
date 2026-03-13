@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import hashlib
 from typing import Protocol
@@ -141,9 +141,30 @@ def apply_trim_config(
     parsed_batch: ParsedBatch,
     trim_config: TrimConfig,
 ) -> PreparedBatch:
-    """Apply trimming across a parsed batch and build derived batch state."""
+    """Apply one trim config across an entire parsed batch."""
+    return apply_trim_configs(
+        parsed_batch,
+        default_trim_config=trim_config,
+    )
+
+
+def apply_trim_configs(
+    parsed_batch: ParsedBatch,
+    *,
+    default_trim_config: TrimConfig | None = None,
+    trim_configs_by_name: Mapping[str, TrimConfig] | None = None,
+) -> PreparedBatch:
+    """Apply trimming across a parsed batch with optional per-record configs."""
+    resolved_default_trim_config = (
+        TrimConfig() if default_trim_config is None else default_trim_config
+    )
+    resolved_trim_configs_by_name = dict(trim_configs_by_name or {})
+
     trim_results = {
-        name: trim_sequence_record(parsed_record, trim_config)
+        name: trim_sequence_record(
+            parsed_record,
+            resolved_trim_configs_by_name.get(name, resolved_default_trim_config),
+        )
         for name, parsed_record in parsed_batch.parsed_records.items()
     }
 
