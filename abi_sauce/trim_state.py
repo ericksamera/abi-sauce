@@ -85,7 +85,12 @@ def build_record_annotations(
 ) -> RecordTrimAnnotations:
     """Build derived labels and flags for record-level trim UI annotations."""
     record_names = tuple(record_names)
-    overridden_record_names = frozenset(trim_configs_by_record)
+    current_record_names = frozenset(record_names)
+    overridden_record_names = frozenset(
+        record_name
+        for record_name in trim_configs_by_record
+        if record_name in current_record_names
+    )
 
     display_labels_by_record = {
         record_name: (

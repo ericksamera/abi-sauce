@@ -6,12 +6,19 @@ import streamlit as st
 
 from abi_sauce.batch import ExportFormat
 from abi_sauce.services.batch import (
-    apply_trim_config,
     apply_trim_configs,
     parse_uploaded_batch,
     prepare_batch_download,
 )
 from abi_sauce.exceptions import ExportError
+from abi_sauce.trim_state import (
+    BatchTrimState,
+    TrimScope,
+    apply_submitted_trim_config,
+    build_record_annotations,
+    resolve_active_trim_config,
+    resolve_batch_trim_inputs,
+)
 from abi_sauce.trimming import TrimConfig
 
 st.set_page_config(page_title="ABI Sauce", layout="wide")
@@ -36,34 +43,57 @@ def _trim_config_from_form() -> TrimConfig:
     )
 
 
-def _apply_trim_form() -> None:
-    submitted_trim_config = _trim_config_from_form()
-    trim_scope = cast(str, st.session_state.trim_scope)
-    selected_record_name = cast(str, st.session_state.selected_record_name)
-    trim_configs_by_record = cast(
-        dict[str, TrimConfig],
-        st.session_state.get("trim_configs_by_record", {}),
+def _trim_state_from_session() -> BatchTrimState:
+    return BatchTrimState(
+        trim_scope=cast(TrimScope, st.session_state.trim_scope),
+        global_trim_config=cast(
+            TrimConfig | None,
+            st.session_state.get("global_trim_config"),
+        ),
+        trim_configs_by_record=dict(
+            cast(
+                dict[str, TrimConfig],
+                st.session_state.get("trim_configs_by_record", {}),
+            )
+        ),
     )
 
-    if trim_scope == "all":
-        st.session_state.global_trim_config = (
-            None if submitted_trim_config == TrimConfig() else submitted_trim_config
-        )
+
+def _write_trim_state_to_session(trim_state: BatchTrimState) -> None:
+    st.session_state.global_trim_config = trim_state.global_trim_config
+    st.session_state.trim_configs_by_record = dict(trim_state.trim_configs_by_record)
+
+
+def _apply_trim_form() -> None:
+    updated_trim_state = apply_submitted_trim_config(
+        _trim_state_from_session(),
+        selected_record_name=cast(str, st.session_state.selected_record_name),
+        submitted_trim_config=_trim_config_from_form(),
+    )
+    _write_trim_state_to_session(updated_trim_state)
+
+
+def _reset_state_for_new_upload(
+    *,
+    upload_signature: object,
+    parsed_record_names: tuple[str, ...],
+) -> None:
+    if st.session_state.get("upload_signature") == upload_signature:
         return
 
-    updated_trim_configs_by_record = dict(trim_configs_by_record)
-    if submitted_trim_config == TrimConfig():
-        updated_trim_configs_by_record.pop(selected_record_name, None)
-    else:
-        updated_trim_configs_by_record[selected_record_name] = submitted_trim_config
-
-    st.session_state.trim_configs_by_record = updated_trim_configs_by_record
-
-
-def _record_option_label(record_name: str, override_record_names: set[str]) -> str:
-    if record_name in override_record_names:
-        return f"{record_name} *"
-    return record_name
+    selected_record_name = parsed_record_names[0]
+    st.session_state.upload_signature = upload_signature
+    st.session_state.global_trim_config = None
+    st.session_state.trim_configs_by_record = {}
+    st.session_state.trim_scope = "all"
+    st.session_state.selected_record_name = selected_record_name
+    st.session_state.trim_form_scope = "all"
+    st.session_state.trim_form_record_name = selected_record_name
+    _load_trim_config_into_form(TrimConfig())
+    st.session_state.batch_export_format = "fasta"
+    st.session_state.concatenate_batch = True
+    st.session_state.batch_filename_stem = "abi-sauce-batch"
+    st.session_state.exclude_failed_min_length_from_export = True
 
 
 uploaded_files = st.file_uploader(
@@ -98,19 +128,10 @@ if not parsed_records:
     st.error("No ABI files could be parsed from this batch.")
     st.stop()
 
-if st.session_state.get("upload_signature") != parsed_batch.signature:
-    st.session_state.upload_signature = parsed_batch.signature
-    st.session_state.global_trim_config = None
-    st.session_state.trim_configs_by_record = {}
-    st.session_state.trim_scope = "all"
-    st.session_state.selected_record_name = next(iter(parsed_records))
-    st.session_state.trim_form_scope = "all"
-    st.session_state.trim_form_record_name = st.session_state.selected_record_name
-    _load_trim_config_into_form(TrimConfig())
-    st.session_state.batch_export_format = "fasta"
-    st.session_state.concatenate_batch = True
-    st.session_state.batch_filename_stem = "abi-sauce-batch"
-    st.session_state.exclude_failed_min_length_from_export = True
+_reset_state_for_new_upload(
+    upload_signature=parsed_batch.signature,
+    parsed_record_names=tuple(parsed_records),
+)
 
 trim_scope = st.radio(
     "Trim scope",
@@ -122,29 +143,27 @@ trim_scope = st.radio(
     key="trim_scope",
 )
 
-global_trim_config = st.session_state.get("global_trim_config")
-trim_configs_by_record = cast(
-    dict[str, TrimConfig],
-    st.session_state.get("trim_configs_by_record", {}),
+trim_state = _trim_state_from_session()
+record_annotations = build_record_annotations(
+    parsed_records.keys(),
+    trim_state.trim_configs_by_record,
 )
-override_record_names = set(trim_configs_by_record)
 
 selected_record_name = st.selectbox(
     "Selected record",
     options=list(parsed_records.keys()),
-    format_func=lambda name: _record_option_label(name, override_record_names),
+    format_func=lambda name: record_annotations.display_labels_by_record[name],
     key="selected_record_name",
 )
 st.caption(
     "* = custom per-sequence trim override "
-    f"({len(override_record_names)}/{len(parsed_records)} records marked)"
+    f"({record_annotations.overridden_count}/{len(parsed_records)} records marked)"
 )
 record = parsed_records[selected_record_name]
 
-active_form_trim_config = (
-    global_trim_config or TrimConfig()
-    if trim_scope == "all"
-    else trim_configs_by_record.get(selected_record_name, TrimConfig())
+active_form_trim_config = resolve_active_trim_config(
+    trim_state,
+    selected_record_name=selected_record_name,
 )
 
 should_refresh_trim_form = st.session_state.get("trim_form_scope") != trim_scope or (
@@ -210,16 +229,13 @@ with st.form("trim_form"):
 
     st.form_submit_button("Apply trim", on_click=_apply_trim_form)
 
-global_trim_config = st.session_state.get("global_trim_config")
-trim_configs_by_record = cast(
-    dict[str, TrimConfig],
-    st.session_state.get("trim_configs_by_record", {}),
-)
+trim_state = _trim_state_from_session()
+resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
 
 has_applied_trim = (
-    global_trim_config is not None
+    resolved_trim_inputs.default_trim_config is not None
     if trim_scope == "all"
-    else bool(trim_configs_by_record)
+    else bool(resolved_trim_inputs.trim_configs_by_name)
 )
 
 if not has_applied_trim:
@@ -227,18 +243,15 @@ if not has_applied_trim:
     st.code(record.sequence[:500] or "<empty>")
     st.stop()
 
-if trim_scope == "all":
-    assert global_trim_config is not None
-    prepared_batch = apply_trim_config(parsed_batch, global_trim_config)
-    effective_trim_config = global_trim_config
-else:
-    prepared_batch = apply_trim_configs(
-        parsed_batch,
-        trim_configs_by_name=trim_configs_by_record,
-    )
-    effective_trim_config = trim_configs_by_record.get(
-        selected_record_name, TrimConfig()
-    )
+prepared_batch = apply_trim_configs(
+    parsed_batch,
+    default_trim_config=resolved_trim_inputs.default_trim_config,
+    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+)
+effective_trim_config = resolve_active_trim_config(
+    trim_state,
+    selected_record_name=selected_record_name,
+)
 
 trim_results = prepared_batch.trim_results
 batch_summary = prepared_batch.batch_summary
@@ -246,7 +259,10 @@ trim_result = trim_results[selected_record_name]
 batch_summary_rows = [
     {
         **record_summary.to_row(),
-        "custom_trim": record_summary.source_filename in trim_configs_by_record,
+        "custom_trim": record_annotations.custom_trim_flags_by_record.get(
+            record_summary.source_filename,
+            False,
+        ),
     }
     for record_summary in batch_summary.records
 ]
