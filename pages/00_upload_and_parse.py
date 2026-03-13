@@ -5,11 +5,8 @@ from typing import cast
 import streamlit as st
 
 from abi_sauce.batch import ExportFormat
-from abi_sauce.services.batch import (
-    apply_trim_configs,
-    parse_uploaded_batch,
-    prepare_batch_download,
-)
+from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
+from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.exceptions import ExportError
 from abi_sauce.trim_state import (
     BatchTrimState,
@@ -96,17 +93,11 @@ def _reset_state_for_new_upload(
     st.session_state.exclude_failed_min_length_from_export = True
 
 
-uploaded_files = st.file_uploader(
-    "Upload ABI trace files",
-    type=["ab1", "abi"],
-    accept_multiple_files=True,
-)
-
-if not uploaded_files:
-    st.info("Upload one or more .ab1 files to test the parser.")
+parsed_batch = get_active_parsed_batch(st.session_state)
+if parsed_batch is None:
+    st.info("Upload one or more .ab1 files from the sidebar to begin.")
     st.stop()
 
-parsed_batch = parse_uploaded_batch(uploaded_files)
 uploads = parsed_batch.uploads
 parsed_records = parsed_batch.parsed_records
 parse_errors = parsed_batch.parse_errors
