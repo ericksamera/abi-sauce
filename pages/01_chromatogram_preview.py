@@ -36,11 +36,6 @@ _SAMPLE_TRIM_FORM_SCOPE_KEY = "sample_viewer.trim_form_scope"
 _SAMPLE_TRIM_FORM_RECORD_NAME_KEY = "sample_viewer.trim_form_record_name"
 
 st.set_page_config(page_title="Sample Viewer", layout="wide")
-st.title("Sample Viewer")
-st.caption(
-    "Inspect one selected sample from the shared active batch, edit shared trim state, and visualize the chromatogram."
-)
-
 
 def _load_trim_config_into_form(config: TrimConfig) -> None:
     st.session_state[_SAMPLE_TRIM_LEFT_KEY] = config.left_trim

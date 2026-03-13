@@ -27,7 +27,7 @@ st.markdown(
     """
 <style>
 section.stMain .block-container {
-    padding-top: 2rem;
+    padding-top: 2.5rem;
     z-index: 1;
 }
 </style>""",
