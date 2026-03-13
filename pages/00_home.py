@@ -41,6 +41,7 @@ def _build_blast_url() -> str | None:
         f"&QUERY={quote(query_text, safe='')}"
     )
 
+
 st.set_page_config(page_title="ABI Sauce", layout="wide")
 st.title("ABI Sauce")
 st.caption(
