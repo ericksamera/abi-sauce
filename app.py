@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from urllib.parse import quote
 
 import streamlit as st
+
+from abi_sauce.viewer_state import get_batch_trim_state
+from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
+from abi_sauce.trim_state import resolve_batch_trim_inputs
 
 from abi_sauce.services.batch import (
     UploadedFileLike,
@@ -148,19 +153,53 @@ def _upload_batch_dialog() -> None:
         st.rerun()
 
 
+def _build_blast_url() -> str | None:
+    parsed_batch = get_active_parsed_batch(st.session_state)
+    if parsed_batch is None or not parsed_batch.parsed_records:
+        return None
+
+    trim_state = get_batch_trim_state(st.session_state)
+    resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
+    prepared_batch = apply_trim_configs(
+        parsed_batch,
+        default_trim_config=resolved_trim_inputs.default_trim_config,
+        trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    )
+
+    artifact = prepare_batch_download(
+        prepared_batch,
+        export_format="fasta",
+        concatenate_batch=True,
+        filename_stem="abi-sauce-batch",
+        require_min_length=True,
+        fasta_line_width=None,
+    )
+    if not artifact.is_downloadable or not isinstance(artifact.data, str):
+        return None
+
+    query_text = artifact.data.strip()
+    return (
+        "https://blast.ncbi.nlm.nih.gov/Blast.cgi"
+        "?PROGRAM=blastn"
+        "&PAGE_TYPE=BlastSearch"
+        "&LINK_LOC=blasthome"
+        f"&QUERY={quote(query_text, safe='')}"
+    )
+
+
 active_parsed_batch = get_active_parsed_batch(st.session_state)
 
-st.sidebar.title("Workspace")
+st.sidebar.title(":apple: abi-sauce")
 st.sidebar.caption(
     "Use the shared active batch across Home, Sample Viewer, and Batch Viewer."
 )
 
-load_button_label = "Upload files" if active_parsed_batch is None else "Upload files"
+load_button_label = "Upload Files" if active_parsed_batch is None else "Upload Files"
 with st.sidebar:
     col_import, col_reset = st.columns([4, 1], border=False)
 
     with col_import:
-        if st.button(load_button_label, use_container_width=True):
+        if st.button(load_button_label, width="stretch"):
             _upload_batch_dialog()
 
     with col_reset:
@@ -168,11 +207,31 @@ with st.sidebar:
             "",
             type="primary",
             key="clear_batch",
-            icon=":material/restart_alt:",
-            use_container_width=True,
+            icon=":material/delete_sweep:",
+            width="stretch",
             disabled=active_parsed_batch is None,
         ):
             _restart_session_dialog()
+
+    if active_parsed_batch is not None and active_parsed_batch.parsed_records:
+
+        blast_url = _build_blast_url()
+        if blast_url is None:
+            st.caption(
+                "No trimmed sequences meeting the minimum-length requirement are available for BLAST."
+            )
+        elif len(blast_url) > 60_000:
+            st.caption(
+                "Batch is too large for a reliable BLAST URL; export FASTA and paste/upload it in BLAST instead."
+            )
+        else:
+            st.link_button(
+                "BLAST Trimmed Sequences",
+                blast_url,
+                width="stretch",
+                icon=":material/rocket_launch:",
+            )
+
 
 pages = [
     st.Page("pages/00_home.py", title="Home", icon=":material/home:"),

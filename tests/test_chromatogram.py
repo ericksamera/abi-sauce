@@ -74,6 +74,8 @@ def test_build_chromatogram_view_renders_traces_and_base_calls_without_qualities
     assert tuple(base_call.position for base_call in view.base_calls) == (1, 3, 5, 7)
     assert view.quality_segments == ()
     assert view.has_quality_overlay is False
+    assert view.retained_sample_range is None
+    assert view.has_any_retained_samples is True
 
 
 def test_build_chromatogram_view_builds_quality_segments_from_peak_midpoints() -> None:
@@ -137,6 +139,8 @@ def test_build_chromatogram_view_computes_trim_boundaries_from_base_midpoints() 
 
     assert view.trim_boundaries.left == 15.0
     assert view.trim_boundaries.right == 35.0
+    assert view.retained_sample_range == (15.0, 35.0)
+    assert view.has_any_retained_samples is True
 
 
 def test_build_chromatogram_view_falls_back_when_channel_order_is_missing_or_invalid() -> (
@@ -208,3 +212,21 @@ def test_build_chromatogram_view_keeps_renderable_trace_when_trim_fails_min_leng
     assert view.is_renderable is True
     assert view.trim_boundaries.left == 3.0
     assert view.trim_boundaries.right == 7.0
+
+
+def test_build_chromatogram_view_marks_when_no_samples_are_retained() -> None:
+    record = make_record(
+        sequence="ACGT",
+        qualities=[40, 39, 38, 37],
+        trace_data=make_trace_data(base_positions=[2, 4, 6, 8]),
+    )
+    trim_result = trim_sequence_record(
+        record,
+        TrimConfig(left_trim=10, right_trim=10),
+    )
+
+    view = build_chromatogram_view(record, trim_result)
+
+    assert view.is_renderable is True
+    assert view.retained_sample_range is None
+    assert view.has_any_retained_samples is False

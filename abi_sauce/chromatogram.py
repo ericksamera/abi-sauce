@@ -69,6 +69,8 @@ class ChromatogramView:
     trim_boundaries: ChromatogramTrimBoundaries = field(
         default_factory=ChromatogramTrimBoundaries
     )
+    retained_sample_range: tuple[float, float] | None = None
+    has_any_retained_samples: bool = True
 
     @property
     def trace_length(self) -> int:
@@ -132,6 +134,11 @@ def build_chromatogram_view(
         base_calls=base_calls,
         trace_length=trace_length,
     )
+    retained_sample_range, has_any_retained_samples = _resolve_retained_sample_range(
+        trim_result=trim_result,
+        base_calls=base_calls,
+        trace_length=trace_length,
+    )
 
     return ChromatogramView(
         is_renderable=True,
@@ -140,6 +147,8 @@ def build_chromatogram_view(
         base_calls=base_calls,
         quality_segments=quality_segments,
         trim_boundaries=trim_boundaries,
+        retained_sample_range=retained_sample_range,
+        has_any_retained_samples=has_any_retained_samples,
     )
 
 
@@ -317,6 +326,40 @@ def _resolve_trim_boundaries(
         left=left_boundary,
         right=right_boundary,
     )
+
+
+def _resolve_retained_sample_range(
+    *,
+    trim_result: TrimResult | None,
+    base_calls: tuple[ChromatogramBaseCall, ...],
+    trace_length: int,
+) -> tuple[tuple[float, float] | None, bool]:
+    if trim_result is None or not base_calls:
+        return (None, True)
+
+    positions = tuple(base_call.position for base_call in base_calls)
+    base_count = len(positions)
+    left_removed = min(max(trim_result.bases_removed_left, 0), base_count)
+    right_removed = min(max(trim_result.bases_removed_right, 0), base_count)
+    kept_end = max(left_removed, base_count - right_removed)
+
+    if trim_result.trimmed_length <= 0 or kept_end <= left_removed:
+        return (None, False)
+
+    retained_left = _quality_left_edge(
+        positions,
+        position_index=left_removed,
+        trace_length=trace_length,
+    )
+    retained_right = _quality_right_edge(
+        positions,
+        position_index=kept_end - 1,
+        trace_length=trace_length,
+    )
+    if retained_right <= retained_left:
+        return (None, False)
+
+    return ((retained_left, retained_right), True)
 
 
 def _left_trim_boundary(
