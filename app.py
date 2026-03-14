@@ -25,6 +25,7 @@ from abi_sauce.upload_state import (
     set_active_parsed_batch,
 )
 from abi_sauce.viewer_state import clear_viewer_session_state
+from abi_sauce.assembly_state import clear_assembly_session_state
 
 _UPLOADER_NONCE_SESSION_KEY = "abi_sauce.uploader_nonce"
 _UPLOADER_KEY_PREFIX = "abi_sauce.active_batch_uploads"
@@ -58,6 +59,7 @@ def _bump_uploader_nonce() -> None:
 def _clear_active_batch_and_uploader() -> None:
     clear_active_batch(st.session_state)
     clear_viewer_session_state(st.session_state)
+    clear_assembly_session_state(st.session_state)
     _bump_uploader_nonce()
 
 
@@ -217,53 +219,6 @@ def _render_sidebar_download_popover() -> None:
 
 active_parsed_batch = get_active_parsed_batch(st.session_state)
 
-st.sidebar.title(":apple: abi-sauce")
-st.sidebar.caption(
-    "Use the shared active batch across Home, Sample Viewer, and Batch Viewer."
-)
-
-load_button_label = "Upload Files" if active_parsed_batch is None else "Upload Files"
-with st.sidebar:
-    col_import, col_reset = st.columns([4, 1], border=False)
-
-    with col_import:
-        if st.button(load_button_label, width="stretch"):
-            _upload_batch_dialog()
-
-    with col_reset:
-        if st.button(
-            "",
-            type="primary",
-            key="clear_batch",
-            icon=":material/delete_sweep:",
-            width="stretch",
-            disabled=active_parsed_batch is None,
-        ):
-            _restart_session_dialog()
-
-    if active_parsed_batch is not None and active_parsed_batch.parsed_records:
-        _render_sidebar_download_popover()
-
-        st.divider()
-
-        blast_url = _build_blast_url()
-        if blast_url is None:
-            st.caption(
-                "No trimmed sequences meeting the minimum-length requirement are available for BLAST."
-            )
-        elif len(blast_url) > 60_000:
-            st.caption(
-                "Batch is too large for a reliable BLAST URL; export FASTA and paste/upload it in BLAST instead."
-            )
-        else:
-            st.link_button(
-                "BLAST Trimmed Sequences",
-                blast_url,
-                width="stretch",
-                icon=":material/rocket_launch:",
-            )
-
-
 pages = [
     st.Page("pages/00_home.py", title="Home", icon=":material/home:"),
 ]
@@ -286,12 +241,68 @@ if active_parsed_batch is not None and active_parsed_batch.parsed_records:
                 title="Reference Alignment",
                 icon=":material/compare_arrows:",
             ),
+            st.Page(
+                "pages/03_assembly.py",
+                title="Assembly",
+                icon=":material/merge_type:",
+            ),
         ]
     )
 
-navigation = st.navigation(
+current_page = st.navigation(
     pages,
     position="top",
 )
 
-navigation.run()
+st.sidebar.title(":apple: abi-sauce")
+st.sidebar.caption(
+    "Use the shared active batch across Home, Sample Viewer, Batch Viewer, and Assembly."
+)
+
+load_button_label = "Upload Files" if active_parsed_batch is None else "Upload Files"
+with st.sidebar:
+    col_import, col_reset = st.columns([4, 1], border=False)
+
+    with col_import:
+        if st.button(load_button_label, width="stretch"):
+            _upload_batch_dialog()
+
+    with col_reset:
+        if st.button(
+            "",
+            type="primary",
+            key="clear_batch",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            disabled=active_parsed_batch is None,
+        ):
+            _restart_session_dialog()
+
+    is_assembly_page = current_page.title == "Assembly"
+    if (
+        active_parsed_batch is not None
+        and active_parsed_batch.parsed_records
+        and not is_assembly_page
+    ):
+        _render_sidebar_download_popover()
+
+        st.divider()
+
+        blast_url = _build_blast_url()
+        if blast_url is None:
+            st.caption(
+                "No trimmed sequences meeting the minimum-length requirement are available for BLAST."
+            )
+        elif len(blast_url) > 60_000:
+            st.caption(
+                "Batch is too large for a reliable BLAST URL; export FASTA and paste/upload it in BLAST instead."
+            )
+        else:
+            st.link_button(
+                "BLAST Trimmed Sequences",
+                blast_url,
+                width="stretch",
+                icon=":material/rocket_launch:",
+            )
+
+current_page.run()
