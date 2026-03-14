@@ -20,6 +20,8 @@ from abi_sauce.assembly_state import (
     sync_assembly_session_state,
     update_assembly_definition,
 )
+from abi_sauce.assembly_trace import build_pairwise_assembly_trace_view
+from abi_sauce.assembly_trace_figure import build_assembly_trace_figure
 from abi_sauce.chromatogram import ChromatogramView, build_chromatogram_view
 from abi_sauce.chromatogram_figure import build_chromatogram_figure
 from abi_sauce.export import to_fasta
@@ -63,6 +65,11 @@ _EDIT_MIN_OVERLAP_WIDGET_KEY_PREFIX = "assembly.dialog.edit.min_overlap"
 _EDIT_MIN_IDENTITY_WIDGET_KEY_PREFIX = "assembly.dialog.edit.min_identity"
 _EDIT_QUALITY_MARGIN_WIDGET_KEY_PREFIX = "assembly.dialog.edit.quality_margin"
 
+_ALIGNED_TRACE_ROW_HEIGHT_PX = 84
+_ALIGNED_TRACE_BASE_HEIGHT_PX = 72
+_ALIGNED_TRACE_MIN_HEIGHT_PX = 240
+_ALIGNED_TRACE_VISIBLE_COLUMNS = 150
+
 st.set_page_config(page_title="Assembly", layout="wide")
 st.title("Assembly")
 st.caption(
@@ -93,6 +100,37 @@ def _centered_x_range(
     right = min(float(max(view.trace_length - 1, 0)), center + half_window)
     if right <= left:
         right = min(float(max(view.trace_length - 1, 0)), left + max(half_window, 1.0))
+    return [left, right]
+
+
+def _centered_alignment_x_range(
+    *,
+    alignment_length: int,
+    cell_width: float,
+    center_column_index: int | None,
+    visible_columns: int = _ALIGNED_TRACE_VISIBLE_COLUMNS,
+) -> list[float]:
+    if alignment_length <= 0:
+        return [0.0, 1.0]
+
+    full_left = 0.0
+    full_right = float(alignment_length) * cell_width
+    visible_width = min(float(visible_columns) * cell_width, full_right - full_left)
+    if visible_width <= 0:
+        return [full_left, full_right]
+
+    if center_column_index is None:
+        return [full_left, full_left + visible_width]
+
+    center = (float(center_column_index) - 0.5) * cell_width
+    half_width = visible_width / 2.0
+    left = max(full_left, center - half_width)
+    right = min(full_right, center + half_width)
+    if right - left < visible_width:
+        if left <= full_left:
+            right = min(full_right, left + visible_width)
+        elif right >= full_right:
+            left = max(full_left, right - visible_width)
     return [left, right]
 
 
@@ -672,17 +710,6 @@ with delete_col:
     ):
         _delete_assembly_dialog(selected_definition)
 
-st.subheader("Saved assemblies")
-st.dataframe(
-    _assembly_summary_rows(
-        computed_assemblies,
-        export_selected_ids=effective_export_selected_ids,
-    ),
-    hide_index=True,
-    width="stretch",
-)
-
-
 if selected_definition is None:
     st.info("Select a saved assembly to inspect its current result.")
     st.stop()
@@ -690,82 +717,8 @@ if selected_definition is None:
 selected_computed_assembly = computed_assemblies[selected_definition.assembly_id]
 selected_result = selected_computed_assembly.result
 
-member_rows = [
-    {
-        "member": f"read {index}",
-        "filename": source_filename,
-        "display_name": prepared_batch.parsed_records[source_filename].name,
-        "display_orientation": prepared_batch.parsed_records[
-            source_filename
-        ].orientation,
-        "trimmed_length": prepared_batch.trim_results[source_filename].trimmed_length,
-        "has_qualities": prepared_batch.trim_results[source_filename].record.qualities
-        is not None,
-        "has_trace_data": prepared_batch.parsed_records[source_filename].trace_data
-        is not None,
-    }
-    for index, source_filename in enumerate(
-        selected_definition.source_filenames,
-        start=1,
-    )
-]
-st.subheader("Assembly members")
-st.dataframe(member_rows, hide_index=True, width="stretch")
-
-if selected_computed_assembly.status == "ok":
-    st.success("Assembly candidate passed the current overlap and identity thresholds.")
-elif selected_computed_assembly.status == "rejected":
-    st.warning(
-        selected_computed_assembly.status_reason
-        or "Assembly candidate did not pass the current filters."
-    )
-else:
-    st.error(
-        selected_computed_assembly.status_reason
-        or "Saved assembly definition could not be resolved."
-    )
-
 if selected_result is None:
     st.stop()
-
-metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
-with metric_col_1:
-    st.metric("Right orientation", selected_result.chosen_right_orientation)
-with metric_col_2:
-    st.metric(
-        "Score",
-        (
-            "NA"
-            if selected_result.score == float("-inf")
-            else f"{selected_result.score:.1f}"
-        ),
-    )
-with metric_col_3:
-    st.metric("Overlap length", selected_result.overlap_length)
-with metric_col_4:
-    st.metric("Identity", f"{selected_result.percent_identity:.1f}%")
-with metric_col_5:
-    st.metric("Conflict columns", selected_result.conflict_count)
-
-if selected_result.aligned_left:
-    st.subheader("Gapped assembly")
-    st.code(format_assembly_block(selected_result), wrap_lines=False)
-
-conflict_rows = assembly_conflicts_to_rows(selected_result)
-selected_conflict_row: dict[str, object] | None = None
-if conflict_rows:
-    st.subheader("Consensus support / conflict columns")
-    st.dataframe(conflict_rows, hide_index=True, width="stretch")
-    selected_conflict_index = cast(
-        int,
-        st.selectbox(
-            "Center chromatograms on conflict",
-            options=list(range(len(conflict_rows))),
-            format_func=lambda index: _conflict_option_label(conflict_rows[index]),
-            key=_SELECTED_CONFLICT_WIDGET_KEY,
-        ),
-    )
-    selected_conflict_row = conflict_rows[selected_conflict_index]
 
 left_source_filename, right_source_filename = selected_definition.source_filenames
 left_raw_record = prepared_batch.parsed_records[left_source_filename]
@@ -773,64 +726,194 @@ right_raw_record = prepared_batch.parsed_records[right_source_filename]
 left_trim_result = prepared_batch.trim_results[left_source_filename]
 right_trim_result = prepared_batch.trim_results[right_source_filename]
 
-left_view = build_chromatogram_view(left_raw_record, left_trim_result)
-right_view = build_chromatogram_view(right_raw_record, right_trim_result)
-
-if left_view.is_renderable and right_view.is_renderable:
-    st.subheader("Chromatograms")
-    theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
-    left_figure = build_chromatogram_figure(left_view, theme_type=theme_type)
-    right_figure = build_chromatogram_figure(right_view, theme_type=theme_type)
-
-    left_trace_x = (
-        None
-        if selected_conflict_row is None
-        else selected_conflict_row.get("left_trace_x")
+theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
+assembly_trace_view = build_pairwise_assembly_trace_view(
+    result=selected_result,
+    left_source_filename=left_source_filename,
+    left_raw_record=left_raw_record,
+    left_trim_result=left_trim_result,
+    right_source_filename=right_source_filename,
+    right_raw_record=right_raw_record,
+    right_trim_result=right_trim_result,
+)
+st.subheader("Aligned electropherogram view")
+aligned_trace_figure = build_assembly_trace_figure(
+    assembly_trace_view,
+    theme_type=theme_type,
+)
+aligned_trace_figure.update_xaxes(
+    range=_centered_alignment_x_range(
+        alignment_length=assembly_trace_view.alignment_length,
+        cell_width=assembly_trace_view.cell_width,
+        center_column_index=None,
     )
-    right_trace_x = (
-        None
-        if selected_conflict_row is None
-        else selected_conflict_row.get("right_trace_x")
+)
+aligned_trace_figure.update_layout(
+    height=max(
+        _ALIGNED_TRACE_MIN_HEIGHT_PX,
+        _ALIGNED_TRACE_BASE_HEIGHT_PX
+        + (len(assembly_trace_view.rows) * _ALIGNED_TRACE_ROW_HEIGHT_PX),
+    ),
+    margin={"l": 24, "r": 24, "t": 24, "b": 56},
+)
+st.plotly_chart(
+    aligned_trace_figure,
+    width="stretch",
+    config={"scrollZoom": False},
+)
+
+debug = False
+if debug:
+    st.subheader("Saved assemblies")
+    st.dataframe(
+        _assembly_summary_rows(
+            computed_assemblies,
+            export_selected_ids=effective_export_selected_ids,
+        ),
+        hide_index=True,
+        width="stretch",
     )
-    if isinstance(left_trace_x, (int, float)):
-        left_figure.update_xaxes(
-            range=_centered_x_range(left_view, center=float(left_trace_x))
+
+    member_rows = [
+        {
+            "member": f"read {index}",
+            "filename": source_filename,
+            "display_name": prepared_batch.parsed_records[source_filename].name,
+            "display_orientation": prepared_batch.parsed_records[
+                source_filename
+            ].orientation,
+            "trimmed_length": prepared_batch.trim_results[
+                source_filename
+            ].trimmed_length,
+            "has_qualities": prepared_batch.trim_results[
+                source_filename
+            ].record.qualities
+            is not None,
+            "has_trace_data": prepared_batch.parsed_records[source_filename].trace_data
+            is not None,
+        }
+        for index, source_filename in enumerate(
+            selected_definition.source_filenames,
+            start=1,
         )
-    if isinstance(right_trace_x, (int, float)):
-        right_figure.update_xaxes(
-            range=_centered_x_range(right_view, center=float(right_trace_x))
+    ]
+    st.subheader("Assembly members")
+    st.dataframe(member_rows, hide_index=True, width="stretch")
+
+    if selected_computed_assembly.status == "ok":
+        st.success(
+            "Assembly candidate passed the current overlap and identity thresholds."
+        )
+    elif selected_computed_assembly.status == "rejected":
+        st.warning(
+            selected_computed_assembly.status_reason
+            or "Assembly candidate did not pass the current filters."
+        )
+    else:
+        st.error(
+            selected_computed_assembly.status_reason
+            or "Saved assembly definition could not be resolved."
         )
 
-    left_figure.update_layout(height=420, margin={"l": 24, "r": 24, "t": 24, "b": 24})
-    right_figure.update_layout(
-        height=420,
-        margin={"l": 24, "r": 24, "t": 24, "b": 24},
-    )
-
-    left_plot_col, right_plot_col = st.columns(2)
-    with left_plot_col:
-        st.caption(f"Left: {selected_result.left_display_name}")
-        st.plotly_chart(
-            left_figure,
-            width="stretch",
-            config={"scrollZoom": False},
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
+    with metric_col_1:
+        st.metric("Right orientation", selected_result.chosen_right_orientation)
+    with metric_col_2:
+        st.metric(
+            "Score",
+            (
+                "NA"
+                if selected_result.score == float("-inf")
+                else f"{selected_result.score:.1f}"
+            ),
         )
-    with right_plot_col:
-        st.caption(f"Right: {selected_result.right_display_name}")
-        st.plotly_chart(
-            right_figure,
-            width="stretch",
-            config={"scrollZoom": False},
+    with metric_col_3:
+        st.metric("Overlap length", selected_result.overlap_length)
+    with metric_col_4:
+        st.metric("Identity", f"{selected_result.percent_identity:.1f}%")
+    with metric_col_5:
+        st.metric("Conflict columns", selected_result.conflict_count)
+
+    if selected_result.aligned_left:
+        st.subheader("Gapped assembly")
+        st.code(format_assembly_block(selected_result), wrap_lines=False)
+
+    conflict_rows = assembly_conflicts_to_rows(selected_result)
+    selected_conflict_row: dict[str, object] | None = None
+    if conflict_rows:
+        st.subheader("Consensus support / conflict columns")
+        st.dataframe(conflict_rows, hide_index=True, width="stretch")
+        selected_conflict_index = cast(
+            int,
+            st.selectbox(
+                "Center chromatograms on conflict",
+                options=list(range(len(conflict_rows))),
+                format_func=lambda index: _conflict_option_label(conflict_rows[index]),
+                key=_SELECTED_CONFLICT_WIDGET_KEY,
+            ),
+        )
+        selected_conflict_row = conflict_rows[selected_conflict_index]
+
+    left_view = build_chromatogram_view(left_raw_record, left_trim_result)
+    right_view = build_chromatogram_view(right_raw_record, right_trim_result)
+
+    if left_view.is_renderable and right_view.is_renderable:
+        st.subheader("Chromatograms")
+        left_figure = build_chromatogram_figure(left_view, theme_type=theme_type)
+        right_figure = build_chromatogram_figure(right_view, theme_type=theme_type)
+
+        left_trace_x = (
+            None
+            if selected_conflict_row is None
+            else selected_conflict_row.get("left_trace_x")
+        )
+        right_trace_x = (
+            None
+            if selected_conflict_row is None
+            else selected_conflict_row.get("right_trace_x")
+        )
+        if isinstance(left_trace_x, (int, float)):
+            left_figure.update_xaxes(
+                range=_centered_x_range(left_view, center=float(left_trace_x))
+            )
+        if isinstance(right_trace_x, (int, float)):
+            right_figure.update_xaxes(
+                range=_centered_x_range(right_view, center=float(right_trace_x))
+            )
+
+        left_figure.update_layout(
+            height=420,
+            margin={"l": 24, "r": 24, "t": 24, "b": 24},
+        )
+        right_figure.update_layout(
+            height=420,
+            margin={"l": 24, "r": 24, "t": 24, "b": 24},
         )
 
-consensus_record = selected_computed_assembly.consensus_record
-if consensus_record is not None and consensus_record.sequence:
-    consensus_fasta = to_fasta(consensus_record, line_width=None)
-    st.subheader("Consensus FASTA")
-    st.code(consensus_fasta, wrap_lines=True)
-    st.download_button(
-        "Download consensus FASTA",
-        data=consensus_fasta,
-        file_name=f"{consensus_record.name}.fasta",
-        mime="text/plain",
-    )
+        left_plot_col, right_plot_col = st.columns(2)
+        with left_plot_col:
+            st.caption(f"Left: {selected_result.left_display_name}")
+            st.plotly_chart(
+                left_figure,
+                width="stretch",
+                config={"scrollZoom": False},
+            )
+        with right_plot_col:
+            st.caption(f"Right: {selected_result.right_display_name}")
+            st.plotly_chart(
+                right_figure,
+                width="stretch",
+                config={"scrollZoom": False},
+            )
+
+    consensus_record = selected_computed_assembly.consensus_record
+    if consensus_record is not None and consensus_record.sequence:
+        consensus_fasta = to_fasta(consensus_record, line_width=None)
+        st.subheader("Consensus FASTA")
+        st.code(consensus_fasta, wrap_lines=True)
+        st.download_button(
+            "Download consensus FASTA",
+            data=consensus_fasta,
+            file_name=f"{consensus_record.name}.fasta",
+            mime="text/plain",
+        )

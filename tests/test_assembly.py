@@ -69,6 +69,13 @@ def test_assemble_trimmed_pair_auto_picks_reverse_complement_for_right_read() ->
     assert result.overlap_length == 5
     assert result.percent_identity == 100.0
     assert result.consensus_sequence == "CCCCAAAAC"
+    assert len(result.columns) == len(result.aligned_left)
+    assert tuple(column.column_index for column in result.columns) == tuple(
+        range(1, len(result.aligned_left) + 1)
+    )
+    assert tuple(column.consensus_base for column in result.columns) == tuple(
+        result.gapped_consensus
+    )
 
 
 def test_assemble_trimmed_pair_rejects_insufficient_overlap() -> None:
@@ -124,6 +131,21 @@ def test_assemble_trimmed_pair_resolves_mismatch_by_quality() -> None:
 
     assert result.accepted is True
     assert result.consensus_sequence == "CCCCTTTT"
+    assert len(result.columns) == 8
+    mismatch_column = result.columns[5]
+    assert mismatch_column.column_index == 6
+    assert mismatch_column.left_query_index == 5
+    assert mismatch_column.right_query_index == 5
+    assert mismatch_column.left_query_pos == 6
+    assert mismatch_column.right_query_pos == 6
+    assert mismatch_column.left_base == "T"
+    assert mismatch_column.right_base == "G"
+    assert mismatch_column.consensus_base == "T"
+    assert mismatch_column.resolution == "quality_resolved"
+    assert mismatch_column.is_overlap is True
+    assert mismatch_column.is_match is False
+    assert mismatch_column.left_trace_x == 95
+    assert mismatch_column.right_trace_x == 55
     assert result.conflict_count == 1
     conflict = result.conflicts[0]
     assert conflict.resolution == "quality_resolved"

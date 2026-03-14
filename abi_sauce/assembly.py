@@ -52,6 +52,27 @@ class AssemblyConflict:
 
 
 @dataclass(frozen=True, slots=True)
+class AssemblyColumn:
+    """One gapped alignment column carrying enough state for downstream views."""
+
+    column_index: int
+    left_base: str
+    right_base: str
+    consensus_base: str
+    resolution: ConflictResolution
+    left_query_index: int | None
+    right_query_index: int | None
+    left_query_pos: int | None
+    right_query_pos: int | None
+    left_quality: int | None
+    right_quality: int | None
+    left_trace_x: int | None
+    right_trace_x: int | None
+    is_overlap: bool
+    is_match: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AssemblyResult:
     """Derived pairwise assembly result for two trimmed reads."""
 
@@ -71,6 +92,7 @@ class AssemblyResult:
     aligned_right: str
     gapped_consensus: str
     consensus_sequence: str
+    columns: tuple[AssemblyColumn, ...] = ()
     conflicts: tuple[AssemblyConflict, ...] = ()
 
     @property
@@ -363,6 +385,7 @@ def _extract_assembly_result(
     aligned_right_chars: list[str] = []
     match_line_chars: list[str] = []
     gapped_consensus_chars: list[str] = []
+    columns: list[AssemblyColumn] = []
     conflicts: list[AssemblyConflict] = []
 
     overlap_length = 0
@@ -426,36 +449,46 @@ def _extract_assembly_result(
         else:
             match_line_chars.append(" ")
 
+        left_trace_x = _trace_position_for_member_query_index(
+            raw_record=left_raw_record,
+            trim_result=left_trim_result,
+            oriented_query_index=(
+                None if resolved_target_index < 0 else resolved_target_index
+            ),
+            strand="forward",
+        )
+        right_trace_x = _trace_position_for_member_query_index(
+            raw_record=right_raw_record,
+            trim_result=right_trim_result,
+            oriented_query_index=(
+                None if resolved_query_index < 0 else resolved_query_index
+            ),
+            strand=chosen_right_orientation,
+        )
+        column = AssemblyColumn(
+            column_index=column_index,
+            left_base=left_base,
+            right_base=right_base,
+            consensus_base=consensus_base,
+            resolution=resolution,
+            left_query_index=(
+                None if resolved_target_index < 0 else resolved_target_index
+            ),
+            right_query_index=(
+                None if resolved_query_index < 0 else resolved_query_index
+            ),
+            left_query_pos=left_query_pos,
+            right_query_pos=right_query_pos,
+            left_quality=left_quality,
+            right_quality=right_quality,
+            left_trace_x=left_trace_x,
+            right_trace_x=right_trace_x,
+            is_overlap=left_base != "-" and right_base != "-",
+            is_match=left_base != "-" and right_base != "-" and left_base == right_base,
+        )
+        columns.append(column)
         if resolution != "concordant":
-            conflicts.append(
-                AssemblyConflict(
-                    column_index=column_index,
-                    left_base=left_base,
-                    right_base=right_base,
-                    consensus_base=consensus_base,
-                    resolution=resolution,
-                    left_query_pos=left_query_pos,
-                    right_query_pos=right_query_pos,
-                    left_quality=left_quality,
-                    right_quality=right_quality,
-                    left_trace_x=_trace_position_for_member_query_index(
-                        raw_record=left_raw_record,
-                        trim_result=left_trim_result,
-                        oriented_query_index=(
-                            None if resolved_target_index < 0 else resolved_target_index
-                        ),
-                        strand="forward",
-                    ),
-                    right_trace_x=_trace_position_for_member_query_index(
-                        raw_record=right_raw_record,
-                        trim_result=right_trim_result,
-                        oriented_query_index=(
-                            None if resolved_query_index < 0 else resolved_query_index
-                        ),
-                        strand=chosen_right_orientation,
-                    ),
-                )
-            )
+            conflicts.append(_conflict_from_column(column))
 
     percent_identity = (match_count / overlap_length) * 100.0 if overlap_length else 0.0
 
@@ -480,7 +513,24 @@ def _extract_assembly_result(
         consensus_sequence="".join(
             base for base in gapped_consensus_chars if base != "-"
         ),
+        columns=tuple(columns),
         conflicts=tuple(conflicts),
+    )
+
+
+def _conflict_from_column(column: AssemblyColumn) -> AssemblyConflict:
+    return AssemblyConflict(
+        column_index=column.column_index,
+        left_base=column.left_base,
+        right_base=column.right_base,
+        consensus_base=column.consensus_base,
+        resolution=column.resolution,
+        left_query_pos=column.left_query_pos,
+        right_query_pos=column.right_query_pos,
+        left_quality=column.left_quality,
+        right_quality=column.right_quality,
+        left_trace_x=column.left_trace_x,
+        right_trace_x=column.right_trace_x,
     )
 
 
@@ -537,6 +587,7 @@ def _replace_result_acceptance(
         aligned_right=result.aligned_right,
         gapped_consensus=result.gapped_consensus,
         consensus_sequence=result.consensus_sequence,
+        columns=result.columns,
         conflicts=result.conflicts,
     )
 
@@ -567,6 +618,7 @@ def _empty_assembly_result(
         aligned_right="",
         gapped_consensus="",
         consensus_sequence="",
+        columns=(),
         conflicts=(),
     )
 

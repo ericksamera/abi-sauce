@@ -38,6 +38,17 @@ class ChromatogramBaseCall:
 
 
 @dataclass(frozen=True, slots=True)
+class ChromatogramBaseSpan:
+    """One called base projected onto a bounded raw trace x-interval."""
+
+    base_index: int
+    left: float
+    right: float
+    center: float
+    width: float
+
+
+@dataclass(frozen=True, slots=True)
 class ChromatogramQualitySegment:
     """One per-base quality score rendered across a chromatogram span."""
 
@@ -66,6 +77,7 @@ class ChromatogramView:
     x_values: tuple[int, ...] = ()
     channels: tuple[ChromatogramChannel, ...] = ()
     base_calls: tuple[ChromatogramBaseCall, ...] = ()
+    base_spans: tuple[ChromatogramBaseSpan, ...] = ()
     quality_segments: tuple[ChromatogramQualitySegment, ...] = ()
     trim_boundaries: ChromatogramTrimBoundaries = field(
         default_factory=ChromatogramTrimBoundaries
@@ -125,10 +137,13 @@ def build_chromatogram_view(
         base_positions=trace_data.base_positions,
         trace_length=trace_length,
     )
-    quality_segments = _build_quality_segments(
-        record.qualities,
+    base_spans = _build_base_spans(
         base_calls,
         trace_length=trace_length,
+    )
+    quality_segments = _build_quality_segments(
+        record.qualities,
+        base_spans,
     )
     trim_boundaries = _resolve_trim_boundaries(
         trim_result=trim_result,
@@ -146,12 +161,28 @@ def build_chromatogram_view(
         x_values=x_values,
         channels=sanitized_channels,
         base_calls=base_calls,
+        base_spans=base_spans,
         quality_segments=quality_segments,
         trim_boundaries=trim_boundaries,
         retained_sample_range=retained_sample_range,
         has_any_retained_samples=has_any_retained_samples,
     )
-    return _apply_orientation_to_view(raw_view, record.orientation)
+    return orient_chromatogram_view(raw_view, record.orientation)
+
+
+def orient_chromatogram_view(
+    view: ChromatogramView,
+    orientation: SequenceOrientation,
+) -> ChromatogramView:
+    """Return a chromatogram view in the requested orientation."""
+    return _apply_orientation_to_view(view, orientation)
+
+
+def reverse_complement_chromatogram_view(
+    view: ChromatogramView,
+) -> ChromatogramView:
+    """Return a reverse-complemented chromatogram view."""
+    return orient_chromatogram_view(view, "reverse_complement")
 
 
 def _build_channels(trace_data: TraceData) -> tuple[ChromatogramChannel, ...]:
@@ -220,21 +251,17 @@ def _build_base_calls(
     return tuple(base_calls)
 
 
-def _build_quality_segments(
-    qualities: list[int] | None,
+def _build_base_spans(
     base_calls: tuple[ChromatogramBaseCall, ...],
     *,
     trace_length: int,
-) -> tuple[ChromatogramQualitySegment, ...]:
-    if qualities is None or not base_calls:
+) -> tuple[ChromatogramBaseSpan, ...]:
+    if not base_calls:
         return ()
 
     positions = tuple(base_call.position for base_call in base_calls)
-    quality_segments: list[ChromatogramQualitySegment] = []
+    base_spans: list[ChromatogramBaseSpan] = []
     for position_index, base_call in enumerate(base_calls):
-        if base_call.base_index >= len(qualities):
-            break
-
         left = _quality_left_edge(
             positions,
             position_index=position_index,
@@ -249,14 +276,39 @@ def _build_quality_segments(
         if width <= 0:
             continue
 
-        quality_segments.append(
-            ChromatogramQualitySegment(
+        base_spans.append(
+            ChromatogramBaseSpan(
                 base_index=base_call.base_index,
                 left=left,
                 right=right,
-                center=_midpoint(left, right),
+                center=float(base_call.position),
                 width=width,
-                quality=int(qualities[base_call.base_index]),
+            )
+        )
+
+    return tuple(base_spans)
+
+
+def _build_quality_segments(
+    qualities: list[int] | None,
+    base_spans: tuple[ChromatogramBaseSpan, ...],
+) -> tuple[ChromatogramQualitySegment, ...]:
+    if qualities is None or not base_spans:
+        return ()
+
+    quality_segments: list[ChromatogramQualitySegment] = []
+    for base_span in base_spans:
+        if base_span.base_index >= len(qualities):
+            break
+
+        quality_segments.append(
+            ChromatogramQualitySegment(
+                base_index=base_span.base_index,
+                left=base_span.left,
+                right=base_span.right,
+                center=base_span.center,
+                width=base_span.width,
+                quality=int(qualities[base_span.base_index]),
             )
         )
 
@@ -380,6 +432,10 @@ def _apply_orientation_to_view(
             view.base_calls,
             trace_length=trace_length,
         ),
+        base_spans=_reverse_complement_base_spans(
+            view.base_spans,
+            trace_length=trace_length,
+        ),
         quality_segments=_reverse_complement_quality_segments(
             view.quality_segments,
             trace_length=trace_length,
@@ -432,6 +488,30 @@ def _reverse_complement_base_calls(
             )
         )
     return tuple(oriented_base_calls)
+
+
+def _reverse_complement_base_spans(
+    base_spans: tuple[ChromatogramBaseSpan, ...],
+    *,
+    trace_length: int,
+) -> tuple[ChromatogramBaseSpan, ...]:
+    oriented_base_spans: list[ChromatogramBaseSpan] = []
+    for display_index, base_span in enumerate(reversed(base_spans)):
+        left = _mirror_coordinate(base_span.right, trace_length=trace_length)
+        right = _mirror_coordinate(base_span.left, trace_length=trace_length)
+        oriented_base_spans.append(
+            ChromatogramBaseSpan(
+                base_index=display_index,
+                left=left,
+                right=right,
+                center=_mirror_coordinate(
+                    base_span.center,
+                    trace_length=trace_length,
+                ),
+                width=max(right - left, 0.0),
+            )
+        )
+    return tuple(oriented_base_spans)
 
 
 def _reverse_complement_quality_segments(
