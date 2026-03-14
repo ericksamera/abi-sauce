@@ -256,7 +256,11 @@ if not chromatogram_view.is_renderable:
     st.warning("Selected record does not have enough trace data to render a chart.")
     st.stop()
 
-figure = build_chromatogram_figure(chromatogram_view)
+theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
+figure = build_chromatogram_figure(
+    chromatogram_view,
+    theme_type=theme_type,
+)
 trace_x = None if selected_event_row is None else selected_event_row.get("trace_x")
 if isinstance(trace_x, (int, float)):
     figure.update_xaxes(

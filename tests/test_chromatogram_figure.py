@@ -233,3 +233,25 @@ def test_build_chromatogram_figure_mutes_everything_when_no_samples_are_retained
         "rgba(190, 190, 190, 0.45)",
         "rgba(190, 190, 190, 0.45)",
     )
+
+
+def test_build_chromatogram_figure_uses_dark_theme_colors_when_requested() -> None:
+    figure = build_chromatogram_figure(
+        make_view(retained_sample_range=(0.0, 2.0)),
+        theme_type="dark",
+    )
+
+    assert figure.layout.plot_bgcolor == "#0E1117"
+    assert figure.layout.font.color == "#FAFAFA"
+    assert figure.layout.xaxis.rangeslider.bgcolor == "#0B0F14"
+    assert figure.data[0].line.color == "rgba(229, 231, 235, 0.40)"
+    assert figure.data[1].line.color == "#E5E7EB"
+    assert tuple(figure.data[5].textfont.color) == (
+        "#22C55E",
+        "rgba(59, 130, 246, 0.45)",
+    )
+    quality_trace = next(trace for trace in figure.data if trace.type == "bar")
+    assert tuple(quality_trace.marker.color) == (
+        "rgba(223, 240, 250, 0.55)",
+        "rgba(148, 163, 184, 0.28)",
+    )

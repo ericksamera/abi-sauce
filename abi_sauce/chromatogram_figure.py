@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Final
 
 import plotly.graph_objects as go
@@ -11,32 +12,98 @@ from abi_sauce.chromatogram import (
     ChromatogramView,
 )
 
-_DEFAULT_TRIM_MARKER_COLOR: Final[str] = "#666666"
-_DEFAULT_RETAINED_QUALITY_COLOR: Final[str] = "rgba(223, 240, 250, 0.95)"
-_DEFAULT_TRIMMED_QUALITY_COLOR: Final[str] = "rgba(190, 190, 190, 0.45)"
-_MUTED_TRACE_COLORS: Final[dict[str, str]] = {
-    "green": "rgba(0, 128, 0, 0.45)",
-    "blue": "rgba(0, 0, 255, 0.45)",
-    "black": "rgba(0, 0, 0, 0.40)",
-    "red": "rgba(255, 0, 0, 0.45)",
-    "magenta": "rgba(255, 58, 255, 0.45)",
-}
 _DEFAULT_INITIAL_VISIBLE_BASES: Final[int] = 50
 _DEFAULT_INITIAL_BASE_PADDING_MULTIPLIER: Final[float] = 1.0
 
 
-def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
+@dataclass(frozen=True, slots=True)
+class ChromatogramFigureTheme:
+    trace_colors: dict[str, str]
+    muted_trace_colors: dict[str, str]
+    trim_marker_color: str
+    retained_quality_color: str
+    trimmed_quality_color: str
+    plot_bgcolor: str
+    paper_bgcolor: str
+    font_color: str
+    axis_color: str
+    grid_color: str
+    rangeslider_bgcolor: str
+    rangeslider_bordercolor: str
+
+
+_LIGHT_THEME: Final[ChromatogramFigureTheme] = ChromatogramFigureTheme(
+    trace_colors={
+        "green": "green",
+        "blue": "blue",
+        "black": "black",
+        "red": "red",
+        "magenta": "magenta",
+    },
+    muted_trace_colors={
+        "green": "rgba(0, 128, 0, 0.45)",
+        "blue": "rgba(0, 0, 255, 0.45)",
+        "black": "rgba(0, 0, 0, 0.40)",
+        "red": "rgba(255, 0, 0, 0.45)",
+        "magenta": "rgba(255, 58, 255, 0.45)",
+    },
+    trim_marker_color="#666666",
+    retained_quality_color="rgba(223, 240, 250, 0.95)",
+    trimmed_quality_color="rgba(190, 190, 190, 0.45)",
+    plot_bgcolor="#FFFFFF",
+    paper_bgcolor="rgba(0, 0, 0, 0)",
+    font_color="#111111",
+    axis_color="#444444",
+    grid_color="rgba(0, 0, 0, 0.10)",
+    rangeslider_bgcolor="#F4F6F8",
+    rangeslider_bordercolor="rgba(0, 0, 0, 0.10)",
+)
+
+_DARK_THEME: Final[ChromatogramFigureTheme] = ChromatogramFigureTheme(
+    trace_colors={
+        "green": "#22C55E",
+        "blue": "#3B82F6",
+        "black": "#E5E7EB",
+        "red": "#EF4444",
+        "magenta": "#F472B6",
+    },
+    muted_trace_colors={
+        "green": "rgba(34, 197, 94, 0.45)",
+        "blue": "rgba(59, 130, 246, 0.45)",
+        "black": "rgba(229, 231, 235, 0.40)",
+        "red": "rgba(239, 68, 68, 0.45)",
+        "magenta": "rgba(244, 114, 182, 0.45)",
+    },
+    trim_marker_color="#94A3B8",
+    retained_quality_color="rgba(223, 240, 250, 0.55)",
+    trimmed_quality_color="rgba(148, 163, 184, 0.28)",
+    plot_bgcolor="#0E1117",
+    paper_bgcolor="rgba(0, 0, 0, 0)",
+    font_color="#FAFAFA",
+    axis_color="#CBD5E1",
+    grid_color="rgba(203, 213, 225, 0.16)",
+    rangeslider_bgcolor="#0B0F14",
+    rangeslider_bordercolor="rgba(203, 213, 225, 0.16)",
+)
+
+
+def build_chromatogram_figure(
+    view: ChromatogramView,
+    *,
+    theme_type: str = "light",
+) -> go.Figure:
     """Build a deterministic Plotly figure from a normalized chromatogram view."""
     if not view.is_renderable:
         raise ValueError("Chromatogram view is not renderable")
 
     max_signal = _max_signal(view)
     base_label_y = _base_label_y(max_signal)
+    theme = _resolve_figure_theme(theme_type)
 
     figure = go.Figure()
 
     for channel in view.channels:
-        _add_channel_traces(figure, view=view, channel=channel)
+        _add_channel_traces(figure, view=view, channel=channel, theme=theme)
 
     called_peak_positions: list[int] = []
     called_peak_heights: list[int] = []
@@ -79,7 +146,7 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
             name="Base calls",
             textfont={
                 "color": [
-                    _base_call_text_color(view, base_call)
+                    _base_call_text_color(view, base_call, theme)
                     for base_call in view.base_calls
                 ]
             },
@@ -105,7 +172,7 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
                 yaxis="y2",
                 marker={
                     "color": [
-                        _quality_segment_color(view, segment)
+                        _quality_segment_color(view, segment, theme)
                         for segment in view.quality_segments
                     ]
                 },
@@ -131,38 +198,60 @@ def build_chromatogram_figure(view: ChromatogramView) -> go.Figure:
             y0=0,
             y1=1,
             line={
-                "color": _DEFAULT_TRIM_MARKER_COLOR,
+                "color": theme.trim_marker_color,
                 "width": 1,
                 "dash": "longdash",
             },
         )
 
+    figure.update_xaxes(
+        title_text="Sample index",
+        title_font={"color": theme.font_color},
+        tickfont={"color": theme.font_color},
+        range=list(_initial_x_range(view)),
+        showgrid=False,
+        linecolor=theme.axis_color,
+        rangeslider={
+            "visible": True,
+            "bgcolor": theme.rangeslider_bgcolor,
+            "bordercolor": theme.rangeslider_bordercolor,
+        },
+    )
+    figure.update_yaxes(
+        title_text="Signal intensity",
+        title_font={"color": theme.font_color},
+        tickfont={"color": theme.font_color},
+        range=[0.0, base_label_y * 1.08],
+        showgrid=True,
+        gridcolor=theme.grid_color,
+        linecolor=theme.axis_color,
+        zeroline=False,
+    )
     figure.update_layout(
-        xaxis={
-            "title": "Sample index",
-            "range": list(_initial_x_range(view)),
-            "rangeslider": {"visible": True},
-        },
-        yaxis={
-            "title": "Signal intensity",
-            "range": [0.0, base_label_y * 1.08],
-        },
         hovermode="x unified",
         bargap=0.0,
         dragmode="pan",
         showlegend=False,
+        plot_bgcolor=theme.plot_bgcolor,
+        paper_bgcolor=theme.paper_bgcolor,
+        font={"color": theme.font_color},
     )
 
     if view.has_quality_overlay:
         max_quality = max(segment.quality for segment in view.quality_segments)
         figure.update_layout(
             yaxis2={
-                "title": "PHRED quality",
+                "title": {
+                    "text": "PHRED quality",
+                    "font": {"color": theme.font_color},
+                },
                 "overlaying": "y",
                 "side": "right",
                 "range": [0.0, max(max_quality * 1.1, 1.0)],
                 "showgrid": False,
                 "zeroline": False,
+                "tickfont": {"color": theme.font_color},
+                "linecolor": theme.axis_color,
             }
         )
 
@@ -326,6 +415,7 @@ def _add_channel_traces(
     *,
     view: ChromatogramView,
     channel: ChromatogramChannel,
+    theme: ChromatogramFigureTheme,
 ) -> None:
     retained_range = view.retained_sample_range
     if retained_range is None and view.has_any_retained_samples:
@@ -335,7 +425,7 @@ def _add_channel_traces(
                 y=channel.signal,
                 mode="lines",
                 name=f"{channel.base} trace",
-                line={"color": channel.color},
+                line={"color": _trace_color(channel.color, theme)},
                 hoverinfo="skip",
                 hovertemplate=None,
             )
@@ -348,7 +438,7 @@ def _add_channel_traces(
             y=channel.signal,
             mode="lines",
             name=f"{channel.base} trace",
-            line={"color": _muted_trace_color(channel.color)},
+            line={"color": _trace_color(channel.color, theme, muted=True)},
             hoverinfo="skip",
             hovertemplate=None,
         )
@@ -372,15 +462,25 @@ def _add_channel_traces(
             mode="lines",
             name=f"{channel.base} trace (retained)",
             showlegend=False,
-            line={"color": channel.color},
+            line={"color": _trace_color(channel.color, theme)},
             hoverinfo="skip",
             hovertemplate=None,
         )
     )
 
 
-def _muted_trace_color(color: str) -> str:
-    return _MUTED_TRACE_COLORS.get(color, color)
+def _resolve_figure_theme(theme_type: str) -> ChromatogramFigureTheme:
+    return _DARK_THEME if theme_type == "dark" else _LIGHT_THEME
+
+
+def _trace_color(
+    color: str,
+    theme: ChromatogramFigureTheme,
+    *,
+    muted: bool = False,
+) -> str:
+    palette = theme.muted_trace_colors if muted else theme.trace_colors
+    return palette.get(color, color)
 
 
 def _is_sample_retained(view: ChromatogramView, sample: float) -> bool:
@@ -400,16 +500,18 @@ def _quality_segment_status(
 def _quality_segment_color(
     view: ChromatogramView,
     segment: ChromatogramQualitySegment,
+    theme: ChromatogramFigureTheme,
 ) -> str:
     if _quality_segment_status(view, segment) == "retained":
-        return _DEFAULT_RETAINED_QUALITY_COLOR
-    return _DEFAULT_TRIMMED_QUALITY_COLOR
+        return theme.retained_quality_color
+    return theme.trimmed_quality_color
 
 
 def _base_call_text_color(
     view: ChromatogramView,
     base_call: ChromatogramBaseCall,
+    theme: ChromatogramFigureTheme,
 ) -> str:
     if _is_sample_retained(view, float(base_call.position)):
-        return base_call.color
-    return _muted_trace_color(base_call.color)
+        return _trace_color(base_call.color, theme)
+    return _trace_color(base_call.color, theme, muted=True)

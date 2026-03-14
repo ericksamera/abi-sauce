@@ -254,7 +254,11 @@ if not chromatogram_view.is_renderable:
         }
     )
 else:
-    figure = build_chromatogram_figure(chromatogram_view)
+    theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
+    figure = build_chromatogram_figure(
+        chromatogram_view,
+        theme_type=theme_type,
+    )
     figure.update_layout(
         height=500,
         margin={"l": 24, "r": 24, "t": 24, "b": 24},
