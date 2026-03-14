@@ -13,7 +13,7 @@ from abi_sauce.export import (
     to_fastq_batch,
     to_zip_batch,
 )
-from abi_sauce.models import SequenceRecord
+from abi_sauce.models import SequenceOrientation, SequenceRecord
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
 
 
@@ -22,6 +22,7 @@ def make_record(
     sequence: str = "ACGTACGT",
     qualities: list[int] | None = None,
     name: str = "trace_001",
+    orientation: SequenceOrientation = "forward",
 ) -> SequenceRecord:
     return SequenceRecord(
         record_id="trace_001",
@@ -29,6 +30,7 @@ def make_record(
         description="test record",
         sequence=sequence,
         source_format="abi",
+        orientation=orientation,
         qualities=qualities,
     )
 
@@ -69,6 +71,29 @@ def test_to_fastq_serializes_four_line_record() -> None:
     result = to_fastq(record)
 
     assert result == "@trace_001\nACGT\n+\nIJKL\n"
+
+
+def test_to_fasta_reverse_complements_reverse_complement_records() -> None:
+    record = make_record(
+        sequence="AAGTC",
+        orientation="reverse_complement",
+    )
+
+    result = to_fasta(record)
+
+    assert result == ">trace_001\nGACTT\n"
+
+
+def test_to_fastq_reverse_complements_sequence_and_reverses_qualities() -> None:
+    record = make_record(
+        sequence="AAGTC",
+        qualities=[30, 31, 32, 33, 34],
+        orientation="reverse_complement",
+    )
+
+    result = to_fastq(record)
+
+    assert result == "@trace_001\nGACTT\n+\nCBA@?\n"
 
 
 def test_to_fastq_requires_qualities() -> None:

@@ -4,8 +4,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final, TypeAlias
 
-from abi_sauce.models import SequenceUpload
-from abi_sauce.services.batch import BatchSignature, ParsedBatch, build_batch_signature
+from abi_sauce.models import SequenceRecord, SequenceUpload
+from abi_sauce.services.batch import (
+    BatchSignature,
+    ParsedBatch,
+    build_batch_signature,
+    replace_parsed_batch_record,
+)
 
 _ACTIVE_UPLOADS_SESSION_KEY: Final[str] = "abi_sauce.active_uploads"
 _ACTIVE_PARSED_BATCH_SESSION_KEY: Final[str] = "abi_sauce.active_parsed_batch"
@@ -95,6 +100,26 @@ def set_active_parsed_batch(
         parsed_batch.uploads,
         parsed_batch=parsed_batch,
     )
+
+
+def update_active_parsed_record(
+    session_state: SessionStateWriter,
+    *,
+    source_filename: str,
+    record: SequenceRecord,
+) -> ParsedBatch:
+    """Replace one parsed record inside the active parsed batch and persist it."""
+    parsed_batch = get_active_parsed_batch(session_state)
+    if parsed_batch is None:
+        raise ValueError("No active parsed batch is available.")
+
+    updated_parsed_batch = replace_parsed_batch_record(
+        parsed_batch,
+        source_filename=source_filename,
+        record=record,
+    )
+    set_active_parsed_batch(session_state, updated_parsed_batch)
+    return updated_parsed_batch
 
 
 def merge_uploads(

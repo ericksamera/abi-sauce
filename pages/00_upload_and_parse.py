@@ -227,7 +227,14 @@ st.write(
 )
 
 st.subheader("Batch summary")
-st.dataframe(batch_summary_rows, hide_index=True, width="stretch")
+st.dataframe(
+    batch_summary_rows,
+    hide_index=True,
+    width="stretch",
+    column_config={
+        "orientation": st.column_config.TextColumn("Orientation"),
+    },
+)
 
 st.subheader("Batch download")
 render_batch_download_controls(

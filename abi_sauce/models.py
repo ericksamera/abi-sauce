@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+SequenceOrientation = Literal["forward", "reverse_complement"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +43,7 @@ class SequenceRecord:
     description: str
     sequence: str
     source_format: str
+    orientation: SequenceOrientation = "forward"
     qualities: list[int] | None = None
     trace_data: TraceData | None = None
     annotations: dict[str, Any] = field(default_factory=dict)

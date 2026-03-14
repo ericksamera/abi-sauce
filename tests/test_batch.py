@@ -86,6 +86,7 @@ def test_build_batch_summary_builds_rows_and_aggregate_counts() -> None:
     assert a_row.display_name == "trace_a"
     assert a_row.original_length == 8
     assert a_row.trimmed_length == 2
+    assert a_row.orientation == "forward"
     assert a_row.total_bases_removed == 6
     assert a_row.fixed_bases_removed_left == 1
     assert a_row.fixed_bases_removed_right == 1
@@ -95,9 +96,11 @@ def test_build_batch_summary_builds_rows_and_aggregate_counts() -> None:
     assert a_row.has_qualities is True
     assert a_row.has_trace_data is True
     assert a_row.fastq_exportable is True
+    assert a_row.to_row()["orientation"] == "forward"
 
     assert b_row.source_filename == "b.ab1"
     assert b_row.trimmed_length == 2
+    assert b_row.orientation == "forward"
     assert b_row.total_bases_removed == 2
     assert b_row.fixed_bases_removed_left == 1
     assert b_row.fixed_bases_removed_right == 1

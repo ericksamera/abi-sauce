@@ -103,6 +103,7 @@ def test_parse_ab1_upload_returns_normalized_sequence_record(
     assert record.name == "trace_001"
     assert record.sequence == "ACGTN"
     assert record.source_format == "abi"
+    assert record.orientation == "forward"
 
     assert record.qualities == [40, 39, 38, 37, 10]
     assert record.trace_data is not None

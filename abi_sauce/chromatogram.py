@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
-from abi_sauce.models import SequenceRecord, TraceData
+from abi_sauce.models import SequenceOrientation, SequenceRecord, TraceData
+from abi_sauce.orientation import complement_base
 from abi_sauce.trimming import TrimResult
 
 _TRACE_CHANNEL_KEYS: Final[tuple[str, ...]] = ("DATA9", "DATA10", "DATA11", "DATA12")
@@ -87,7 +88,7 @@ def build_chromatogram_view(
     record: SequenceRecord,
     trim_result: TrimResult | None = None,
 ) -> ChromatogramView:
-    """Build a normalized chromatogram view model from one raw sequence record."""
+    """Build a normalized chromatogram view model from one sequence record."""
     trace_data = record.trace_data
     if trace_data is None:
         return ChromatogramView(
@@ -140,7 +141,7 @@ def build_chromatogram_view(
         trace_length=trace_length,
     )
 
-    return ChromatogramView(
+    raw_view = ChromatogramView(
         is_renderable=True,
         x_values=x_values,
         channels=sanitized_channels,
@@ -150,6 +151,7 @@ def build_chromatogram_view(
         retained_sample_range=retained_sample_range,
         has_any_retained_samples=has_any_retained_samples,
     )
+    return _apply_orientation_to_view(raw_view, record.orientation)
 
 
 def _build_channels(trace_data: TraceData) -> tuple[ChromatogramChannel, ...]:
@@ -360,6 +362,146 @@ def _resolve_retained_sample_range(
         return (None, False)
 
     return ((retained_left, retained_right), True)
+
+
+def _apply_orientation_to_view(
+    view: ChromatogramView,
+    orientation: SequenceOrientation,
+) -> ChromatogramView:
+    if orientation == "forward" or not view.is_renderable:
+        return view
+
+    trace_length = view.trace_length
+    return ChromatogramView(
+        is_renderable=True,
+        x_values=view.x_values,
+        channels=_reverse_complement_channels(view.channels),
+        base_calls=_reverse_complement_base_calls(
+            view.base_calls,
+            trace_length=trace_length,
+        ),
+        quality_segments=_reverse_complement_quality_segments(
+            view.quality_segments,
+            trace_length=trace_length,
+        ),
+        trim_boundaries=_reverse_complement_trim_boundaries(
+            view.trim_boundaries,
+            trace_length=trace_length,
+        ),
+        retained_sample_range=_reverse_complement_retained_sample_range(
+            view.retained_sample_range,
+            trace_length=trace_length,
+        ),
+        has_any_retained_samples=view.has_any_retained_samples,
+    )
+
+
+def _reverse_complement_channels(
+    channels: tuple[ChromatogramChannel, ...],
+) -> tuple[ChromatogramChannel, ...]:
+    return tuple(
+        ChromatogramChannel(
+            data_key=channel.data_key,
+            base=_complement_display_base(channel.base),
+            color=_display_color_for_base(_complement_display_base(channel.base)),
+            signal=tuple(reversed(channel.signal)),
+        )
+        for channel in channels
+    )
+
+
+def _reverse_complement_base_calls(
+    base_calls: tuple[ChromatogramBaseCall, ...],
+    *,
+    trace_length: int,
+) -> tuple[ChromatogramBaseCall, ...]:
+    oriented_base_calls: list[ChromatogramBaseCall] = []
+    for display_index, base_call in enumerate(reversed(base_calls)):
+        base = _complement_display_base(base_call.base)
+        oriented_base_calls.append(
+            ChromatogramBaseCall(
+                base_index=display_index,
+                base=base,
+                position=int(
+                    _mirror_coordinate(
+                        base_call.position,
+                        trace_length=trace_length,
+                    )
+                ),
+                color=_display_color_for_base(base),
+            )
+        )
+    return tuple(oriented_base_calls)
+
+
+def _reverse_complement_quality_segments(
+    quality_segments: tuple[ChromatogramQualitySegment, ...],
+    *,
+    trace_length: int,
+) -> tuple[ChromatogramQualitySegment, ...]:
+    oriented_quality_segments: list[ChromatogramQualitySegment] = []
+    for display_index, quality_segment in enumerate(reversed(quality_segments)):
+        left = _mirror_coordinate(quality_segment.right, trace_length=trace_length)
+        right = _mirror_coordinate(quality_segment.left, trace_length=trace_length)
+        oriented_quality_segments.append(
+            ChromatogramQualitySegment(
+                base_index=display_index,
+                left=left,
+                right=right,
+                center=_midpoint(left, right),
+                width=max(right - left, 0.0),
+                quality=quality_segment.quality,
+            )
+        )
+    return tuple(oriented_quality_segments)
+
+
+def _reverse_complement_trim_boundaries(
+    trim_boundaries: ChromatogramTrimBoundaries,
+    *,
+    trace_length: int,
+) -> ChromatogramTrimBoundaries:
+    return ChromatogramTrimBoundaries(
+        left=_mirrored_boundary(trim_boundaries.right, trace_length=trace_length),
+        right=_mirrored_boundary(trim_boundaries.left, trace_length=trace_length),
+    )
+
+
+def _reverse_complement_retained_sample_range(
+    retained_sample_range: tuple[float, float] | None,
+    *,
+    trace_length: int,
+) -> tuple[float, float] | None:
+    if retained_sample_range is None:
+        return None
+
+    retained_left, retained_right = retained_sample_range
+    return (
+        _mirror_coordinate(retained_right, trace_length=trace_length),
+        _mirror_coordinate(retained_left, trace_length=trace_length),
+    )
+
+
+def _complement_display_base(base: str) -> str:
+    return complement_base(base).upper()
+
+
+def _display_color_for_base(base: str) -> str:
+    return _CHANNEL_COLORS.get(base, "magenta")
+
+
+def _mirrored_boundary(
+    boundary: float | None,
+    *,
+    trace_length: int,
+) -> float | None:
+    if boundary is None:
+        return None
+    return _mirror_coordinate(boundary, trace_length=trace_length)
+
+
+def _mirror_coordinate(value: float, *, trace_length: int) -> float:
+    return float(trace_length - 1) - value
 
 
 def _left_trim_boundary(

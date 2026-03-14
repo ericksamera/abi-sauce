@@ -46,6 +46,7 @@ def _to_sequence_record(
         description=bio_record.description,
         sequence=str(bio_record.seq),
         source_format="abi",
+        orientation="forward",
         qualities=qualities,
         trace_data=trace_data,
         annotations={

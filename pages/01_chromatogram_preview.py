@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import cast
 
 import streamlit as st
@@ -7,6 +8,12 @@ import streamlit as st
 from abi_sauce.chromatogram import build_chromatogram_view
 from abi_sauce.chromatogram_figure import build_chromatogram_figure
 from abi_sauce.export import to_fasta
+from abi_sauce.models import SequenceOrientation
+from abi_sauce.orientation import (
+    orient_left_right_values,
+    orient_trim_config_for_display,
+    raw_trim_config_from_display,
+)
 from abi_sauce.services.batch import apply_trim_configs
 from abi_sauce.trim_state import (
     BatchTrimState,
@@ -16,7 +23,7 @@ from abi_sauce.trim_state import (
     resolve_batch_trim_inputs,
 )
 from abi_sauce.trimming import TrimConfig
-from abi_sauce.upload_state import get_active_parsed_batch
+from abi_sauce.upload_state import get_active_parsed_batch, update_active_parsed_record
 from abi_sauce.viewer_state import (
     get_batch_trim_state,
     get_selected_record_name,
@@ -34,26 +41,38 @@ _SAMPLE_SELECTED_RECORD_WIDGET_KEY = "sample_viewer.selected_record_widget"
 _SAMPLE_TRIM_FORM_SCOPE_KEY = "sample_viewer.trim_form_scope"
 _SAMPLE_TRIM_FORM_RECORD_NAME_KEY = "sample_viewer.trim_form_record_name"
 _SAMPLE_TRIM_FORM_CONFIG_KEY = "sample_viewer.trim_form_config"
+_SAMPLE_TRIM_FORM_ORIENTATION_KEY = "sample_viewer.trim_form_orientation"
+_SAMPLE_ORIENTATION_WIDGET_KEY = "sample_viewer.orientation_is_reverse_complement"
+_SAMPLE_ORIENTATION_RECORD_NAME_KEY = "sample_viewer.orientation_record_name"
 
 st.set_page_config(page_title="Sample Viewer", layout="wide")
 
 
-def _load_trim_config_into_form(config: TrimConfig) -> None:
-    st.session_state[_SAMPLE_TRIM_LEFT_KEY] = config.left_trim
-    st.session_state[_SAMPLE_TRIM_RIGHT_KEY] = config.right_trim
+def _load_trim_config_into_form(
+    config: TrimConfig,
+    *,
+    orientation: SequenceOrientation,
+) -> None:
+    display_trim_config = orient_trim_config_for_display(config, orientation)
+    st.session_state[_SAMPLE_TRIM_LEFT_KEY] = display_trim_config.left_trim
+    st.session_state[_SAMPLE_TRIM_RIGHT_KEY] = display_trim_config.right_trim
     st.session_state[_SAMPLE_TRIM_MIN_LENGTH_KEY] = config.min_length
     st.session_state[_SAMPLE_TRIM_QUALITY_ENABLED_KEY] = config.quality_trim_enabled
     st.session_state[_SAMPLE_TRIM_ERROR_CUTOFF_KEY] = config.error_probability_cutoff
 
 
-def _trim_config_from_form() -> TrimConfig:
-    return TrimConfig(
+def _trim_config_from_form(
+    *,
+    orientation: SequenceOrientation,
+) -> TrimConfig:
+    display_trim_config = TrimConfig(
         left_trim=int(st.session_state[_SAMPLE_TRIM_LEFT_KEY]),
         right_trim=int(st.session_state[_SAMPLE_TRIM_RIGHT_KEY]),
         min_length=int(st.session_state[_SAMPLE_TRIM_MIN_LENGTH_KEY]),
         quality_trim_enabled=bool(st.session_state[_SAMPLE_TRIM_QUALITY_ENABLED_KEY]),
         error_probability_cutoff=float(st.session_state[_SAMPLE_TRIM_ERROR_CUTOFF_KEY]),
     )
+    return raw_trim_config_from_display(display_trim_config, orientation)
 
 
 def _resolve_sample_form_trim_config(
@@ -72,6 +91,15 @@ def _resolve_sample_form_trim_config(
 
 
 def _apply_trim_form() -> None:
+    parsed_batch = get_active_parsed_batch(st.session_state)
+    selected_record_name = cast(str, get_selected_record_name(st.session_state))
+    if parsed_batch is None:
+        return
+
+    record = parsed_batch.parsed_records.get(selected_record_name)
+    if record is None:
+        return
+
     current_trim_state = get_batch_trim_state(st.session_state)
     updated_trim_state = apply_submitted_trim_config(
         BatchTrimState(
@@ -79,16 +107,42 @@ def _apply_trim_form() -> None:
             global_trim_config=current_trim_state.global_trim_config,
             trim_configs_by_record=dict(current_trim_state.trim_configs_by_record),
         ),
-        selected_record_name=cast(str, get_selected_record_name(st.session_state)),
-        submitted_trim_config=_trim_config_from_form(),
+        selected_record_name=selected_record_name,
+        submitted_trim_config=_trim_config_from_form(orientation=record.orientation),
     )
     set_batch_trim_state(st.session_state, updated_trim_state)
+
+
+def _apply_orientation_toggle() -> None:
+    parsed_batch = get_active_parsed_batch(st.session_state)
+    selected_record_name = get_selected_record_name(st.session_state)
+    if parsed_batch is None or selected_record_name is None:
+        return
+
+    record = parsed_batch.parsed_records.get(selected_record_name)
+    if record is None:
+        return
+
+    next_orientation: SequenceOrientation = (
+        "reverse_complement"
+        if bool(st.session_state.get(_SAMPLE_ORIENTATION_WIDGET_KEY))
+        else "forward"
+    )
+    if record.orientation == next_orientation:
+        return
+
+    update_active_parsed_record(
+        st.session_state,
+        source_filename=selected_record_name,
+        record=replace(record, orientation=next_orientation),
+    )
 
 
 parsed_batch = get_active_parsed_batch(st.session_state)
 if parsed_batch is None:
     st.info(
-        "Load one or more .ab1 files from the workspace sidebar to inspect individual samples."
+        "Load one or more .ab1 files from the workspace sidebar to "
+        "inspect individual samples."
     )
     st.stop()
 
@@ -113,20 +167,43 @@ record_annotations = build_record_annotations(
     parsed_records.keys(),
     trim_state.trim_configs_by_record,
 )
-selected_record_name = cast(
-    str,
-    st.selectbox(
-        "Sample",
-        options=record_names,
-        index=record_names.index(selected_record_name),
-        format_func=lambda filename: record_annotations.display_labels_by_record[
-            filename
-        ],
-        key=_SAMPLE_SELECTED_RECORD_WIDGET_KEY,
-    ),
-)
+sample_col, orientation_col = st.columns([4, 2])
+with sample_col:
+    selected_record_name = cast(
+        str,
+        st.selectbox(
+            "Sample",
+            options=record_names,
+            index=record_names.index(selected_record_name),
+            format_func=lambda filename: record_annotations.display_labels_by_record[
+                filename
+            ],
+            key=_SAMPLE_SELECTED_RECORD_WIDGET_KEY,
+        ),
+    )
 set_selected_record_name(st.session_state, selected_record_name)
 record = parsed_records[selected_record_name]
+
+orientation_is_reverse_complement = record.orientation == "reverse_complement"
+should_refresh_orientation_widget = (
+    st.session_state.get(_SAMPLE_ORIENTATION_RECORD_NAME_KEY) != selected_record_name
+    or st.session_state.get(_SAMPLE_ORIENTATION_WIDGET_KEY)
+    != orientation_is_reverse_complement
+)
+if should_refresh_orientation_widget:
+    st.session_state[_SAMPLE_ORIENTATION_WIDGET_KEY] = orientation_is_reverse_complement
+    st.session_state[_SAMPLE_ORIENTATION_RECORD_NAME_KEY] = selected_record_name
+
+with orientation_col:
+    st.toggle(
+        "Reverse-complement",
+        key=_SAMPLE_ORIENTATION_WIDGET_KEY,
+        help=(
+            "Persist this sample in reverse-complement orientation for "
+            "sequence preview, export output, and chromatogram display."
+        ),
+        on_change=_apply_orientation_toggle,
+    )
 
 record_annotations = build_record_annotations(
     parsed_records.keys(),
@@ -140,12 +217,17 @@ should_refresh_trim_form = (
     st.session_state.get(_SAMPLE_TRIM_FORM_SCOPE_KEY) != trim_state.trim_scope
     or st.session_state.get(_SAMPLE_TRIM_FORM_RECORD_NAME_KEY) != selected_record_name
     or st.session_state.get(_SAMPLE_TRIM_FORM_CONFIG_KEY) != active_form_trim_config
+    or st.session_state.get(_SAMPLE_TRIM_FORM_ORIENTATION_KEY) != record.orientation
 )
 if should_refresh_trim_form:
-    _load_trim_config_into_form(active_form_trim_config)
+    _load_trim_config_into_form(
+        active_form_trim_config,
+        orientation=record.orientation,
+    )
     st.session_state[_SAMPLE_TRIM_FORM_SCOPE_KEY] = trim_state.trim_scope
     st.session_state[_SAMPLE_TRIM_FORM_RECORD_NAME_KEY] = selected_record_name
     st.session_state[_SAMPLE_TRIM_FORM_CONFIG_KEY] = active_form_trim_config
+    st.session_state[_SAMPLE_TRIM_FORM_ORIENTATION_KEY] = record.orientation
 trim_state = get_batch_trim_state(st.session_state)
 resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
 prepared_batch = apply_trim_configs(
@@ -158,7 +240,21 @@ effective_trim_config = resolve_active_trim_config(
     trim_state,
     selected_record_name=selected_record_name,
 )
+display_bases_removed_left, display_bases_removed_right = orient_left_right_values(
+    trim_result.bases_removed_left,
+    trim_result.bases_removed_right,
+    record.orientation,
+)
 chromatogram_view = build_chromatogram_view(record, trim_result)
+
+st.caption(
+    "Sample orientation: "
+    + (
+        "reverse-complement"
+        if record.orientation == "reverse_complement"
+        else "forward"
+    )
+)
 
 if not chromatogram_view.is_renderable:
     st.warning("Selected record does not have enough trace data to render a chart.")
@@ -187,9 +283,9 @@ with metric_col_1:
 with metric_col_2:
     st.metric("Trimmed length", trim_result.trimmed_length)
 with metric_col_3:
-    st.metric("Bases removed left", trim_result.bases_removed_left)
+    st.metric("Bases removed left", display_bases_removed_left)
 with metric_col_4:
-    st.metric("Bases removed right", trim_result.bases_removed_right)
+    st.metric("Bases removed right", display_bases_removed_right)
 with change_trim_col:
     with st.popover(
         "Modify trimming",
@@ -197,6 +293,11 @@ with change_trim_col:
         width="stretch",
         icon=":material/discover_tune:",
     ):
+        if record.orientation == "reverse_complement":
+            st.caption(
+                "Trim inputs are interpreted relative to the displayed reverse-complement view."
+            )
+
         trim_left_col, trim_right_col, trim_min_length_col = st.columns(3)
         with trim_left_col:
             st.number_input(

@@ -13,6 +13,7 @@ from abi_sauce.upload_state import (
     read_active_batch_state,
     set_active_parsed_batch,
     set_active_uploads,
+    update_active_parsed_record,
 )
 
 
@@ -112,6 +113,39 @@ def test_set_active_uploads_rejects_mismatched_parsed_batch() -> None:
             session_state,
             (make_upload("different.ab1", b"zz"),),
             parsed_batch=parsed_batch,
+        )
+
+
+def test_update_active_parsed_record_replaces_one_record_in_session_batch() -> None:
+    session_state: dict[str, object] = {}
+    parsed_batch = make_parsed_batch()
+    set_active_parsed_batch(session_state, parsed_batch)
+
+    replacement_record = make_record("trace_a_rc")
+    replacement_record.orientation = "reverse_complement"
+
+    updated_batch = update_active_parsed_record(
+        session_state,
+        source_filename="a.ab1",
+        record=replacement_record,
+    )
+
+    assert updated_batch.uploads == parsed_batch.uploads
+    assert updated_batch.parse_errors == parsed_batch.parse_errors
+    assert updated_batch.signature == parsed_batch.signature
+    assert get_active_parsed_batch(session_state) == updated_batch
+    assert updated_batch.parsed_records["a.ab1"].orientation == "reverse_complement"
+    assert updated_batch.parsed_records["b.ab1"] == parsed_batch.parsed_records["b.ab1"]
+
+
+def test_update_active_parsed_record_requires_an_active_parsed_batch() -> None:
+    session_state: dict[str, object] = {}
+
+    with pytest.raises(ValueError, match="No active parsed batch is available."):
+        update_active_parsed_record(
+            session_state,
+            source_filename="a.ab1",
+            record=make_record("trace_a"),
         )
 
 

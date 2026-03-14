@@ -7,6 +7,7 @@ import zipfile
 
 from abi_sauce.exceptions import ExportError
 from abi_sauce.models import SequenceRecord
+from abi_sauce.orientation import materialize_oriented_record
 
 
 def to_fasta(record: SequenceRecord, *, line_width: int | None = 80) -> str:
@@ -14,27 +15,29 @@ def to_fasta(record: SequenceRecord, *, line_width: int | None = 80) -> str:
     if line_width is not None and line_width <= 0:
         raise ValueError("line_width must be > 0")
 
-    header = _header_for_record(record)
-    wrapped_sequence = _wrap_sequence(record.sequence, line_width)
+    oriented_record = materialize_oriented_record(record)
+    header = _header_for_record(oriented_record)
+    wrapped_sequence = _wrap_sequence(oriented_record.sequence, line_width)
 
     return f">{header}\n{wrapped_sequence}\n"
 
 
 def to_fastq(record: SequenceRecord) -> str:
     """Serialize a sequence record as FASTQ text using PHRED+33 encoding."""
-    header = _header_for_record(record)
-    qualities = record.qualities
+    oriented_record = materialize_oriented_record(record)
+    header = _header_for_record(oriented_record)
+    qualities = oriented_record.qualities
 
     if qualities is None:
         raise ExportError("FASTQ export requires per-base qualities.")
 
-    if len(qualities) != len(record.sequence):
+    if len(qualities) != len(oriented_record.sequence):
         raise ExportError(
             "FASTQ export requires sequence and qualities to have the same length."
         )
 
     quality_string = "".join(_encode_phred_quality(score) for score in qualities)
-    return f"@{header}\n{record.sequence}\n+\n{quality_string}\n"
+    return f"@{header}\n{oriented_record.sequence}\n+\n{quality_string}\n"
 
 
 def to_fasta_batch(

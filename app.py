@@ -266,6 +266,11 @@ with st.sidebar:
 
 pages = [
     st.Page("pages/00_home.py", title="Home", icon=":material/home:"),
+    st.Page(
+        "pages/02_reference_alignment.py",
+        title="Reference Alignment",
+        icon=":material/compare_arrows:",
+    ),
 ]
 
 if active_parsed_batch is not None and active_parsed_batch.parsed_records:

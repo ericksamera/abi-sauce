@@ -7,7 +7,7 @@ import hashlib
 import pytest
 
 from abi_sauce.exceptions import ExportError
-from abi_sauce.models import SequenceRecord, SequenceUpload
+from abi_sauce.models import SequenceOrientation, SequenceRecord, SequenceUpload
 from abi_sauce.services import batch as batch_service
 from abi_sauce.trimming import TrimConfig
 
@@ -30,6 +30,7 @@ def make_record(
     *,
     sequence: str = "ACGT",
     qualities: list[int] | None = None,
+    orientation: SequenceOrientation = "forward",
 ) -> SequenceRecord:
     return SequenceRecord(
         record_id=f"{name}_id",
@@ -37,6 +38,7 @@ def make_record(
         description="test record",
         sequence=sequence,
         source_format="abi",
+        orientation=orientation,
         qualities=qualities,
     )
 
@@ -123,6 +125,31 @@ def make_parsed_batch() -> batch_service.ParsedBatch:
         parse_errors={"broken.ab1": "Failed to parse ABI file: broken.ab1"},
         signature=batch_service.build_batch_signature(uploads),
     )
+
+
+def test_replace_parsed_batch_record_replaces_one_record_and_preserves_batch_metadata() -> (
+    None
+):
+    parsed_batch = make_parsed_batch()
+    replacement_record = make_record(
+        "trace_a_rc",
+        sequence="TTTT",
+        qualities=[30, 31, 32, 33],
+        orientation="reverse_complement",
+    )
+
+    updated_batch = batch_service.replace_parsed_batch_record(
+        parsed_batch,
+        source_filename="a.ab1",
+        record=replacement_record,
+    )
+
+    assert updated_batch.uploads == parsed_batch.uploads
+    assert updated_batch.parse_errors == parsed_batch.parse_errors
+    assert updated_batch.signature == parsed_batch.signature
+    assert updated_batch.parsed_records["a.ab1"] == replacement_record
+    assert updated_batch.parsed_records["b.ab1"] == parsed_batch.parsed_records["b.ab1"]
+    assert parsed_batch.parsed_records["a.ab1"].name == "trace_a"
 
 
 def test_apply_trim_configs_supports_per_record_configs() -> None:
@@ -238,6 +265,35 @@ def test_prepare_batch_download_supports_unwrapped_fasta_output() -> None:
     assert artifact.filename == "blast-batch.fasta"
     assert artifact.mime == "text/plain"
     assert artifact.data == ">trace_a\nACGTAC\n>trace_b\nACGT\n"
+
+
+def test_prepare_batch_download_applies_orientation_to_fasta_exports() -> None:
+    uploads = (SequenceUpload(filename="rc.ab1", content=b"rc"),)
+    parsed_batch = batch_service.ParsedBatch(
+        uploads=uploads,
+        parsed_records={
+            "rc.ab1": make_record(
+                "trace_rc",
+                sequence="AAGTC",
+                orientation="reverse_complement",
+            )
+        },
+        parse_errors={},
+        signature=batch_service.build_batch_signature(uploads),
+    )
+    prepared_batch = batch_service.apply_trim_config(parsed_batch, TrimConfig())
+
+    artifact = batch_service.prepare_batch_download(
+        prepared_batch,
+        export_format="fasta",
+        concatenate_batch=True,
+        filename_stem="blast-batch",
+        require_min_length=True,
+        fasta_line_width=None,
+    )
+
+    assert artifact.is_downloadable is True
+    assert artifact.data == ">trace_rc\nGACTT\n"
 
 
 def test_prepare_batch_download_builds_zip_artifact() -> None:

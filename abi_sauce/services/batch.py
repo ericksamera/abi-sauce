@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from typing import Protocol
 
@@ -134,6 +134,25 @@ def parse_uploads(uploads: Iterable[SequenceUpload]) -> ParsedBatch:
         parsed_records=parsed_records,
         parse_errors=parse_errors,
         signature=build_batch_signature(uploads_tuple),
+    )
+
+
+def replace_parsed_batch_record(
+    parsed_batch: ParsedBatch,
+    *,
+    source_filename: str,
+    record: SequenceRecord,
+) -> ParsedBatch:
+    """Return a ParsedBatch with one parsed record replaced by source filename."""
+    if source_filename not in parsed_batch.parsed_records:
+        raise KeyError(source_filename)
+
+    updated_parsed_records = dict(parsed_batch.parsed_records)
+    updated_parsed_records[source_filename] = record
+    return replace(
+        parsed_batch,
+        parsed_records=updated_parsed_records,
+        parse_errors=dict(parsed_batch.parse_errors),
     )
 
 

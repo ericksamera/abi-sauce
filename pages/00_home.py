@@ -38,6 +38,7 @@ def _build_record_rows(
             "record_id": record.record_id,
             "name": record.name,
             "sequence_length": len(record.sequence),
+            "orientation": record.orientation,
             "has_trace_data": record.trace_data is not None,
             "quality_count": 0 if record.qualities is None else len(record.qualities),
             "trace_score": _annotation_number(record, "trace_score"),
@@ -328,6 +329,7 @@ if parsed_batch.parsed_records:
         hide_index=True,
         width="stretch",
         column_config={
+            "orientation": st.column_config.TextColumn("Orientation"),
             "trace_score": st.column_config.NumberColumn(
                 "Trace score",
                 format="%.0f",

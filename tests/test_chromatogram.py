@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abi_sauce.chromatogram import build_chromatogram_view
-from abi_sauce.models import SequenceRecord, TraceData
+from abi_sauce.models import SequenceOrientation, SequenceRecord, TraceData
 from abi_sauce.trimming import TrimConfig, TrimResult, trim_sequence_record
 
 
@@ -11,6 +11,7 @@ def make_record(
     qualities: list[int] | None = None,
     trace_data: TraceData | None = None,
     name: str = "trace_001",
+    orientation: SequenceOrientation = "forward",
 ) -> SequenceRecord:
     return SequenceRecord(
         record_id=f"{name}_id",
@@ -18,6 +19,7 @@ def make_record(
         description="synthetic trace",
         sequence=sequence,
         source_format="abi",
+        orientation=orientation,
         qualities=qualities,
         trace_data=trace_data,
     )
@@ -230,3 +232,90 @@ def test_build_chromatogram_view_marks_when_no_samples_are_retained() -> None:
     assert view.is_renderable is True
     assert view.retained_sample_range is None
     assert view.has_any_retained_samples is False
+
+
+def test_build_chromatogram_view_reverse_complements_channels_base_calls_and_qualities() -> (
+    None
+):
+    view = build_chromatogram_view(
+        make_record(
+            sequence="AAGC",
+            qualities=[10, 20, 30, 40],
+            orientation="reverse_complement",
+            trace_data=TraceData(
+                channels={
+                    "DATA9": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+                    "DATA10": [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
+                    "DATA11": [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52],
+                    "DATA12": [61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72],
+                },
+                base_positions=[1, 4, 7, 9],
+                channel_order="GATC",
+            ),
+        )
+    )
+
+    assert view.is_renderable is True
+    assert tuple(channel.base for channel in view.channels) == ("C", "T", "A", "G")
+    assert tuple(channel.signal[:4] for channel in view.channels) == (
+        (12, 11, 10, 9),
+        (32, 31, 30, 29),
+        (52, 51, 50, 49),
+        (72, 71, 70, 69),
+    )
+    assert tuple(base_call.base for base_call in view.base_calls) == (
+        "G",
+        "C",
+        "T",
+        "T",
+    )
+    assert tuple(base_call.position for base_call in view.base_calls) == (2, 4, 7, 10)
+    assert tuple(segment.quality for segment in view.quality_segments) == (
+        40,
+        30,
+        20,
+        10,
+    )
+    assert tuple(segment.left for segment in view.quality_segments) == (
+        1.0,
+        3.0,
+        5.5,
+        8.5,
+    )
+    assert tuple(segment.right for segment in view.quality_segments) == (
+        3.0,
+        5.5,
+        8.5,
+        11.0,
+    )
+
+
+def test_build_chromatogram_view_reverse_complements_trim_boundaries_and_retained_range() -> (
+    None
+):
+    record = make_record(
+        sequence="AAGC",
+        qualities=[10, 20, 30, 40],
+        orientation="reverse_complement",
+        trace_data=TraceData(
+            channels={
+                "DATA9": list(range(12)),
+                "DATA10": list(range(12)),
+                "DATA11": list(range(12)),
+                "DATA12": list(range(12)),
+            },
+            base_positions=[1, 4, 7, 9],
+            channel_order="GATC",
+        ),
+    )
+    trim_result = trim_sequence_record(
+        record,
+        TrimConfig(left_trim=1, right_trim=1),
+    )
+
+    view = build_chromatogram_view(record, trim_result)
+
+    assert view.trim_boundaries.left == 3.0
+    assert view.trim_boundaries.right == 8.5
+    assert view.retained_sample_range == (3.0, 8.5)
+    assert view.has_any_retained_samples is True

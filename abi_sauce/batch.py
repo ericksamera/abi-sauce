@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from abi_sauce.models import SequenceRecord, SequenceUpload
+from abi_sauce.models import SequenceOrientation, SequenceRecord, SequenceUpload
 from abi_sauce.trimming import TrimResult
 
 ExportFormat = Literal["fasta", "fastq"]
@@ -19,6 +19,7 @@ class BatchRecordSummary:
     display_name: str
     original_length: int
     trimmed_length: int
+    orientation: SequenceOrientation
     total_bases_removed: int
     fixed_bases_removed_left: int
     fixed_bases_removed_right: int
@@ -35,6 +36,7 @@ class BatchRecordSummary:
             "filename": self.source_filename,
             "record": self.display_name,
             "trimmed_length": self.trimmed_length,
+            "orientation": self.orientation,
             "bases_removed": self.total_bases_removed,
             "fixed_left": self.fixed_bases_removed_left,
             "fixed_right": self.fixed_bases_removed_right,
@@ -209,6 +211,7 @@ def _build_record_summary(
         display_name=record.name or record.record_id or source_filename,
         original_length=trim_result.original_length,
         trimmed_length=trim_result.trimmed_length,
+        orientation=record.orientation,
         total_bases_removed=trim_result.original_length - trim_result.trimmed_length,
         fixed_bases_removed_left=trim_result.fixed_bases_removed_left,
         fixed_bases_removed_right=trim_result.fixed_bases_removed_right,

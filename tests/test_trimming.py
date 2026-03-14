@@ -79,6 +79,23 @@ def test_trim_sequence_record_trims_qualities_in_sync() -> None:
     assert result.record.qualities == [11, 12, 13, 14, 15]
 
 
+def test_trim_sequence_record_preserves_orientation() -> None:
+    record = make_record(
+        sequence="ACGTACGT",
+        qualities=[10, 11, 12, 13, 14, 15, 16, 17],
+    )
+    record.orientation = "reverse_complement"
+
+    result = trim_sequence_record(
+        record,
+        TrimConfig(left_trim=1, right_trim=2),
+    )
+
+    assert result.record.sequence == "CGTAC"
+    assert result.record.qualities == [11, 12, 13, 14, 15]
+    assert result.record.orientation == "reverse_complement"
+
+
 def test_trim_sequence_record_flags_min_length_failure() -> None:
     record = make_record(sequence="ACGT")
     result = trim_sequence_record(
