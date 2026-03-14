@@ -1,0 +1,7 @@
+[tool.mypy]
+python_version = "3.11"
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["Bio", "Bio.*", "streamlit", "streamlit.*", "plotly", "plotly.*"]
+ignore_missing_imports = true
