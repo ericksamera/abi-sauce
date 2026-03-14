@@ -762,6 +762,19 @@ st.plotly_chart(
     config={"scrollZoom": False},
 )
 
+
+consensus_record = selected_computed_assembly.consensus_record
+if consensus_record is not None and consensus_record.sequence:
+    consensus_fasta = to_fasta(consensus_record, line_width=None)
+    st.subheader("Consensus FASTA")
+    st.code(consensus_fasta, wrap_lines=True)
+    st.download_button(
+        "Download consensus FASTA",
+        data=consensus_fasta,
+        file_name=f"{consensus_record.name}.fasta",
+        mime="text/plain",
+    )
+
 debug = False
 if debug:
     st.subheader("Saved assemblies")
@@ -905,15 +918,3 @@ if debug:
                 width="stretch",
                 config={"scrollZoom": False},
             )
-
-    consensus_record = selected_computed_assembly.consensus_record
-    if consensus_record is not None and consensus_record.sequence:
-        consensus_fasta = to_fasta(consensus_record, line_width=None)
-        st.subheader("Consensus FASTA")
-        st.code(consensus_fasta, wrap_lines=True)
-        st.download_button(
-            "Download consensus FASTA",
-            data=consensus_fasta,
-            file_name=f"{consensus_record.name}.fasta",
-            mime="text/plain",
-        )
