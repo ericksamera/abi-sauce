@@ -194,17 +194,6 @@ if should_refresh_orientation_widget:
     st.session_state[_SAMPLE_ORIENTATION_WIDGET_KEY] = orientation_is_reverse_complement
     st.session_state[_SAMPLE_ORIENTATION_RECORD_NAME_KEY] = selected_record_name
 
-with orientation_col:
-    st.toggle(
-        "Reverse-complement",
-        key=_SAMPLE_ORIENTATION_WIDGET_KEY,
-        help=(
-            "Persist this sample in reverse-complement orientation for "
-            "sequence preview, export output, and chromatogram display."
-        ),
-        on_change=_apply_orientation_toggle,
-    )
-
 record_annotations = build_record_annotations(
     parsed_records.keys(),
     trim_state.trim_configs_by_record,
@@ -247,13 +236,14 @@ display_bases_removed_left, display_bases_removed_right = orient_left_right_valu
 )
 chromatogram_view = build_chromatogram_view(record, trim_result)
 
-st.caption(
-    "Sample orientation: "
-    + (
-        "reverse-complement"
-        if record.orientation == "reverse_complement"
-        else "forward"
-    )
+st.toggle(
+    "Reverse-complement",
+    key=_SAMPLE_ORIENTATION_WIDGET_KEY,
+    help=(
+        "Persist this sample in reverse-complement orientation for "
+        "sequence preview, export output, and chromatogram display."
+    ),
+    on_change=_apply_orientation_toggle,
 )
 
 if not chromatogram_view.is_renderable:
