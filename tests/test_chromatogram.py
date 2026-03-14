@@ -54,6 +54,7 @@ def test_build_chromatogram_view_returns_not_renderable_without_trace_data() -> 
     assert view.render_failure_reason == "missing_trace_data"
     assert view.channels == ()
     assert view.base_calls == ()
+    assert view.base_spans == ()
     assert view.quality_segments == ()
 
 
@@ -74,6 +75,24 @@ def test_build_chromatogram_view_renders_traces_and_base_calls_without_qualities
     assert tuple(channel.base for channel in view.channels) == ("G", "A", "T", "C")
     assert tuple(base_call.base for base_call in view.base_calls) == tuple("ACGT")
     assert tuple(base_call.position for base_call in view.base_calls) == (1, 3, 5, 7)
+    assert tuple(base_span.left for base_span in view.base_spans) == (
+        0.0,
+        2.0,
+        4.0,
+        6.0,
+    )
+    assert tuple(base_span.right for base_span in view.base_spans) == (
+        2.0,
+        4.0,
+        6.0,
+        8.0,
+    )
+    assert tuple(base_span.center for base_span in view.base_spans) == (
+        1.0,
+        3.0,
+        5.0,
+        7.0,
+    )
     assert view.quality_segments == ()
     assert view.has_quality_overlay is False
     assert view.retained_sample_range is None
@@ -89,6 +108,18 @@ def test_build_chromatogram_view_builds_quality_segments_from_peak_midpoints() -
         )
     )
 
+    assert tuple(base_span.left for base_span in view.base_spans) == (
+        1.0,
+        3.0,
+        5.0,
+        7.0,
+    )
+    assert tuple(base_span.right for base_span in view.base_spans) == (
+        3.0,
+        5.0,
+        7.0,
+        9.0,
+    )
     assert tuple(segment.left for segment in view.quality_segments) == (
         1.0,
         3.0,
@@ -191,6 +222,8 @@ def test_build_chromatogram_view_sanitizes_channel_lengths_and_out_of_range_posi
     assert view.trace_length == 6
     assert tuple(len(channel.signal) for channel in view.channels) == (6, 6, 6, 6)
     assert tuple(base_call.position for base_call in view.base_calls) == (1, 3, 5)
+    assert tuple(base_span.left for base_span in view.base_spans) == (0.0, 2.0, 4.0)
+    assert tuple(base_span.right for base_span in view.base_spans) == (2.0, 4.0, 5.0)
     assert tuple(segment.left for segment in view.quality_segments) == (0.0, 2.0, 4.0)
     assert tuple(segment.right for segment in view.quality_segments) == (2.0, 4.0, 5.0)
 
@@ -270,6 +303,24 @@ def test_build_chromatogram_view_reverse_complements_channels_base_calls_and_qua
         "T",
     )
     assert tuple(base_call.position for base_call in view.base_calls) == (2, 4, 7, 10)
+    assert tuple(base_span.left for base_span in view.base_spans) == (
+        1.0,
+        3.0,
+        5.5,
+        8.5,
+    )
+    assert tuple(base_span.right for base_span in view.base_spans) == (
+        3.0,
+        5.5,
+        8.5,
+        11.0,
+    )
+    assert tuple(base_span.center for base_span in view.base_spans) == (
+        2.0,
+        4.0,
+        7.0,
+        10.0,
+    )
     assert tuple(segment.quality for segment in view.quality_segments) == (
         40,
         30,
