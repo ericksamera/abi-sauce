@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-from abi_sauce.assembly import AssemblyConfig, assemble_trimmed_pair
-from abi_sauce.assembly_trace import build_pairwise_assembly_trace_view
+from abi_sauce.assembly import (
+    AssemblyConfig,
+    assemble_trimmed_multi,
+    assemble_trimmed_pair,
+)
+from abi_sauce.assembly_trace import (
+    build_multi_assembly_trace_view,
+    build_pairwise_assembly_trace_view,
+)
 from abi_sauce.models import SequenceRecord, TraceData
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
 
@@ -254,3 +261,75 @@ def test_build_pairwise_assembly_trace_view_degrades_without_renderable_trace_da
     assert all(cell.channels == () for cell in right_row.cells)
     assert left_row.aligned_sequence == result.aligned_left
     assert right_row.aligned_sequence == result.aligned_right
+
+
+def test_build_multi_assembly_trace_view_builds_one_row_per_included_member() -> None:
+    seed_raw_record = make_record(
+        name="seed",
+        sequence="AACCGGTTA",
+        qualities=[40] * 9,
+        base_positions=[5, 15, 25, 35, 45, 55, 65, 75, 85],
+    )
+    shifted_raw_record = make_record(
+        name="shifted",
+        sequence="ACCGGATTA",
+        qualities=[35] * 9,
+        base_positions=[15, 25, 35, 45, 55, 65, 75, 85, 95],
+    )
+    reverse_raw_record = make_record(
+        name="reverse",
+        sequence="TAACCGGTT",
+        qualities=[30] * 9,
+        base_positions=[5, 15, 25, 35, 45, 55, 65, 75, 85],
+    )
+
+    trim_results = {
+        "seed.ab1": trim_sequence_record(seed_raw_record, TrimConfig()),
+        "shifted.ab1": trim_sequence_record(shifted_raw_record, TrimConfig()),
+        "reverse.ab1": trim_sequence_record(reverse_raw_record, TrimConfig()),
+    }
+    raw_records = {
+        "seed.ab1": seed_raw_record,
+        "shifted.ab1": shifted_raw_record,
+        "reverse.ab1": reverse_raw_record,
+    }
+    result = assemble_trimmed_multi(
+        source_filenames=("seed.ab1", "shifted.ab1", "reverse.ab1"),
+        raw_records_by_source_filename=raw_records,
+        trim_results_by_source_filename=trim_results,
+        config=AssemblyConfig(min_overlap_length=4, min_percent_identity=70.0),
+    )
+
+    trace_view = build_multi_assembly_trace_view(
+        result=result,
+        raw_records_by_source_filename=raw_records,
+        trim_results_by_source_filename=trim_results,
+    )
+
+    assert trace_view.alignment_length == len(result.columns)
+    assert trace_view.x_range == (0.0, float(len(result.columns)))
+    assert len(trace_view.rows) == 3
+    assert tuple(row.y_bottom for row in trace_view.rows) == (6.0, 3.0, 0.0)
+    assert tuple(row.y_top for row in trace_view.rows) == (9.0, 6.0, 3.0)
+    assert tuple(row.strand for row in trace_view.rows) == (
+        "forward",
+        "forward",
+        "reverse-complement",
+    )
+    assert tuple(row.aligned_sequence for row in trace_view.rows) == (
+        "AACCGG-TTA",
+        "-ACCGGATTA",
+        "AACCGG-TTA",
+    )
+
+    insertion_column_index = 6
+    seed_cell = trace_view.rows[0].cells[insertion_column_index]
+    shifted_cell = trace_view.rows[1].cells[insertion_column_index]
+    reverse_cell = trace_view.rows[2].cells[insertion_column_index]
+
+    assert seed_cell.base == "-"
+    assert shifted_cell.base == "A"
+    assert reverse_cell.base == "-"
+    assert seed_cell.channels == ()
+    assert reverse_cell.channels == ()
+    assert shifted_cell.has_trace_signal is True

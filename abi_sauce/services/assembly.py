@@ -8,8 +8,12 @@ from typing import Literal
 import zipfile
 
 from abi_sauce.assembly import (
+    AssemblyComputationResult,
     AssemblyResult,
+    MultiAssemblyResult,
+    assemble_trimmed_multi,
     assemble_trimmed_pair,
+    consensus_record_from_multi_result,
     consensus_record_from_result,
     format_assembly_block,
 )
@@ -19,7 +23,13 @@ from abi_sauce.export import to_fasta, to_fasta_batch, to_zip_batch
 from abi_sauce.models import SequenceRecord
 from abi_sauce.services.batch import PreparedBatch
 
-AssemblyComputationStatus = Literal["ok", "invalid_definition", "rejected", "error"]
+AssemblyComputationStatus = Literal[
+    "ok",
+    "invalid_definition",
+    "not_implemented",
+    "rejected",
+    "error",
+]
 AssemblyExportFormat = Literal["fasta"]
 
 
@@ -28,7 +38,7 @@ class ComputedAssembly:
     """One saved assembly definition resolved against the current prepared batch."""
 
     definition: AssemblyDefinition
-    result: AssemblyResult | None
+    result: AssemblyComputationResult | None
     status: AssemblyComputationStatus
     status_reason: str | None = None
     consensus_record: SequenceRecord | None = None
@@ -87,6 +97,34 @@ def compute_saved_assembly(
             consensus_record=None,
         )
 
+    if definition.engine_kind == "pairwise":
+        return _compute_saved_pairwise_assembly(prepared_batch, definition)
+    if definition.engine_kind == "multi":
+        return compute_saved_multi_assembly(prepared_batch, definition)
+
+    return ComputedAssembly(
+        definition=definition,
+        result=None,
+        status="invalid_definition",
+        status_reason=f"unsupported assembly engine: {definition.engine_kind}",
+        consensus_record=None,
+    )
+
+
+def _compute_saved_pairwise_assembly(
+    prepared_batch: PreparedBatch,
+    definition: AssemblyDefinition,
+) -> ComputedAssembly:
+    pairwise_reasons = _pairwise_definition_ineligible_reasons(definition)
+    if pairwise_reasons:
+        return ComputedAssembly(
+            definition=definition,
+            result=None,
+            status="invalid_definition",
+            status_reason="; ".join(pairwise_reasons),
+            consensus_record=None,
+        )
+
     left_source_filename, right_source_filename = definition.source_filenames
     left_raw_record = prepared_batch.parsed_records[left_source_filename]
     right_raw_record = prepared_batch.parsed_records[right_source_filename]
@@ -114,6 +152,60 @@ def compute_saved_assembly(
 
     consensus_record = (
         consensus_record_from_result(result, name=definition.name)
+        if result.consensus_sequence
+        else None
+    )
+    if result.accepted:
+        return ComputedAssembly(
+            definition=definition,
+            result=result,
+            status="ok",
+            status_reason=None,
+            consensus_record=consensus_record,
+        )
+
+    return ComputedAssembly(
+        definition=definition,
+        result=result,
+        status="rejected",
+        status_reason=result.rejection_reason or "assembly rejected",
+        consensus_record=consensus_record,
+    )
+
+
+def compute_saved_multi_assembly(
+    prepared_batch: PreparedBatch,
+    definition: AssemblyDefinition,
+) -> ComputedAssembly:
+    """Resolve one saved multi-read assembly definition against the batch."""
+    multi_reasons = _multi_definition_ineligible_reasons(definition)
+    if multi_reasons:
+        return ComputedAssembly(
+            definition=definition,
+            result=None,
+            status="invalid_definition",
+            status_reason="; ".join(multi_reasons),
+            consensus_record=None,
+        )
+
+    try:
+        result = assemble_trimmed_multi(
+            source_filenames=definition.source_filenames,
+            raw_records_by_source_filename=prepared_batch.parsed_records,
+            trim_results_by_source_filename=prepared_batch.trim_results,
+            config=definition.config,
+        )
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        return ComputedAssembly(
+            definition=definition,
+            result=None,
+            status="error",
+            status_reason=str(exc),
+            consensus_record=None,
+        )
+
+    consensus_record = (
+        consensus_record_from_multi_result(result, name=definition.name)
         if result.consensus_sequence
         else None
     )
@@ -287,10 +379,10 @@ def _definition_ineligible_reasons(
 ) -> tuple[str, ...]:
     reasons: list[str] = []
 
-    if definition.engine_kind != "pairwise":
+    if definition.engine_kind not in {"pairwise", "multi"}:
         reasons.append(f"unsupported assembly engine: {definition.engine_kind}")
-    if len(definition.source_filenames) != 2:
-        reasons.append("pairwise assembly currently requires exactly 2 reads")
+    if not definition.source_filenames:
+        reasons.append("assembly requires at least 1 read")
     if len(set(definition.source_filenames)) != len(definition.source_filenames):
         reasons.append("assembly members must be distinct reads")
 
@@ -308,23 +400,53 @@ def _definition_ineligible_reasons(
     return tuple(reasons)
 
 
+def _pairwise_definition_ineligible_reasons(
+    definition: AssemblyDefinition,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+
+    if len(definition.source_filenames) != 2:
+        reasons.append("pairwise assembly currently requires exactly 2 reads")
+
+    return tuple(reasons)
+
+
+def _multi_definition_ineligible_reasons(
+    definition: AssemblyDefinition,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+
+    if len(definition.source_filenames) < 2:
+        reasons.append("multi assembly currently requires at least 2 reads")
+
+    return tuple(reasons)
+
+
 def _computed_assembly_ineligible_reasons(
     computed_assembly: ComputedAssembly,
     *,
     require_accepted: bool,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    blocked_by_status = False
 
     if computed_assembly.status == "invalid_definition":
         reasons.append(
             computed_assembly.status_reason or "assembly definition is invalid"
         )
+        blocked_by_status = True
+    elif computed_assembly.status == "not_implemented":
+        reasons.append(
+            computed_assembly.status_reason or "assembly engine is not implemented yet"
+        )
+        blocked_by_status = True
     elif computed_assembly.status == "error":
         reasons.append(computed_assembly.status_reason or "assembly failed to compute")
+        blocked_by_status = True
     elif require_accepted and computed_assembly.status == "rejected":
         reasons.append(computed_assembly.status_reason or "assembly was rejected")
 
-    if computed_assembly.consensus_record is None:
+    if computed_assembly.consensus_record is None and not blocked_by_status:
         reasons.append("no consensus sequence is available")
 
     return tuple(reasons)
@@ -385,7 +507,7 @@ def _to_zip_batch_with_manifest(
 def _manifest_entry(computed_assembly: ComputedAssembly) -> dict[str, object]:
     result = computed_assembly.result
     definition = computed_assembly.definition
-    return {
+    manifest_entry: dict[str, object] = {
         "assembly_id": definition.assembly_id,
         "assembly_name": definition.name,
         "engine_kind": definition.engine_kind,
@@ -412,15 +534,43 @@ def _manifest_entry(computed_assembly: ComputedAssembly) -> dict[str, object]:
             if computed_assembly.consensus_record is None
             else len(computed_assembly.consensus_record.sequence)
         ),
-        "chosen_right_orientation": (
-            None if result is None else result.chosen_right_orientation
-        ),
-        "overlap_length": None if result is None else result.overlap_length,
-        "percent_identity": None if result is None else result.percent_identity,
-        "conflict_count": None if result is None else result.conflict_count,
         "rejection_reason": None if result is None else result.rejection_reason,
-        "alignment_preview": None if result is None else format_assembly_block(result),
     }
+    if isinstance(result, AssemblyResult):
+        manifest_entry.update(
+            {
+                "chosen_right_orientation": result.chosen_right_orientation,
+                "overlap_length": result.overlap_length,
+                "percent_identity": result.percent_identity,
+                "conflict_count": result.conflict_count,
+                "alignment_preview": format_assembly_block(result),
+            }
+        )
+    elif isinstance(result, MultiAssemblyResult):
+        manifest_entry.update(
+            {
+                "seed_member_index": result.seed_member_index,
+                "included_member_count": result.included_member_count,
+                "excluded_member_count": result.excluded_member_count,
+                "ambiguous_column_count": result.ambiguous_column_count,
+                "member_summaries": [
+                    {
+                        "member_index": member.member_index,
+                        "source_filename": member.source_filename,
+                        "display_name": member.display_name,
+                        "is_seed": member.is_seed,
+                        "included": member.included,
+                        "chosen_orientation": member.chosen_orientation,
+                        "inclusion_reason": member.inclusion_reason,
+                        "overlap_length": member.overlap_length,
+                        "percent_identity": member.percent_identity,
+                    }
+                    for member in result.members
+                ],
+                "gapped_consensus": result.gapped_consensus,
+            }
+        )
+    return manifest_entry
 
 
 def _safe_filename(value: str) -> str:

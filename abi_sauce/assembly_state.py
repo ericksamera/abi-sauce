@@ -9,7 +9,7 @@ from uuid import uuid4
 from abi_sauce.assembly import AssemblyConfig
 from abi_sauce.services.batch import BatchSignature
 
-AssemblyEngineKind = Literal["pairwise"]
+AssemblyEngineKind = Literal["pairwise", "multi"]
 
 SessionStateReader: TypeAlias = Any
 SessionStateWriter: TypeAlias = Any
