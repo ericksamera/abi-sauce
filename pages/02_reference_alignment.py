@@ -12,8 +12,8 @@ from abi_sauce.reference_alignment import (
     alignment_events_to_rows,
     format_alignment_block,
 )
-from abi_sauce.services.batch import apply_trim_configs
-from abi_sauce.trim_state import build_record_annotations, resolve_batch_trim_inputs
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
+from abi_sauce.trim_state import build_record_annotations
 from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.viewer_state import (
     get_batch_trim_state,
@@ -126,11 +126,9 @@ selected_record_name = cast(
 )
 set_selected_record_name(st.session_state, selected_record_name)
 
-resolved_trim_inputs = resolve_batch_trim_inputs(get_batch_trim_state(st.session_state))
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    get_batch_trim_state(st.session_state),
 )
 raw_record = parsed_records[selected_record_name]
 trim_result = prepared_batch.trim_results[selected_record_name]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Final
 
 from abi_sauce.models import SequenceOrientation, SequenceRecord, TraceData
@@ -94,6 +95,173 @@ class ChromatogramView:
     def has_quality_overlay(self) -> bool:
         """Return whether quality markers are available for plotting."""
         return bool(self.quality_segments)
+
+
+@dataclass(frozen=True, slots=True)
+class ChromatogramColumnChannel:
+    """One resampled trace-channel segment inside a fixed-width base column."""
+
+    base: str
+    color: str
+    x_values: tuple[float, ...] = ()
+    signal: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ChromatogramColumn:
+    """One called base projected onto a fixed-width base-index column."""
+
+    column_index: int
+    base_index: int
+    query_pos: int
+    base: str
+    color: str
+    quality: int | None
+    trace_x: int | None
+    peak_height: int | None
+    is_retained: bool
+    cell_left: float
+    cell_right: float
+    cell_center: float
+    raw_left: float | None = None
+    raw_right: float | None = None
+    raw_center: float | None = None
+    channels: tuple[ChromatogramColumnChannel, ...] = ()
+
+    @property
+    def has_trace_signal(self) -> bool:
+        """Return whether the column carries any resampled trace segments."""
+        return bool(self.channels)
+
+
+@dataclass(frozen=True, slots=True)
+class ChromatogramColumnView:
+    """Pure fixed-width base-column view for one chromatogram."""
+
+    is_renderable: bool
+    render_failure_reason: str | None = None
+    columns: tuple[ChromatogramColumn, ...] = ()
+    trim_boundaries: ChromatogramTrimBoundaries = field(
+        default_factory=ChromatogramTrimBoundaries
+    )
+    cell_width: float = 1.0
+    samples_per_base: int = 16
+
+    @property
+    def base_count(self) -> int:
+        """Return the number of fixed-width base columns in the view."""
+        return len(self.columns)
+
+    @property
+    def has_quality_overlay(self) -> bool:
+        """Return whether any base column carries a quality value."""
+        return any(column.quality is not None for column in self.columns)
+
+    @property
+    def has_any_retained_bases(self) -> bool:
+        """Return whether any base column falls inside the retained trim window."""
+        return any(column.is_retained for column in self.columns)
+
+    @property
+    def x_range(self) -> tuple[float, float]:
+        """Return the x-extent in base-column coordinates."""
+        return (0.0, float(self.base_count) * self.cell_width)
+
+
+def build_chromatogram_column_view(
+    record: SequenceRecord,
+    trim_result: TrimResult | None = None,
+    *,
+    cell_width: float = 1.0,
+    samples_per_base: int = 16,
+) -> ChromatogramColumnView:
+    """Project one chromatogram onto a fixed-width base-column grid."""
+    if cell_width <= 0:
+        raise ValueError("cell_width must be > 0")
+    if samples_per_base < 2:
+        raise ValueError("samples_per_base must be >= 2")
+
+    raw_view = build_chromatogram_view(record, trim_result)
+    if not raw_view.is_renderable:
+        return ChromatogramColumnView(
+            is_renderable=False,
+            render_failure_reason=raw_view.render_failure_reason,
+            cell_width=cell_width,
+            samples_per_base=samples_per_base,
+        )
+
+    base_spans_by_index = {
+        base_span.base_index: base_span for base_span in raw_view.base_spans
+    }
+    quality_segments_by_index = {
+        quality_segment.base_index: quality_segment
+        for quality_segment in raw_view.quality_segments
+    }
+
+    columns: list[ChromatogramColumn] = []
+    for column_index, base_call in enumerate(raw_view.base_calls, start=1):
+        cell_left = float(column_index - 1) * cell_width
+        cell_right = cell_left + cell_width
+        cell_center = _midpoint(cell_left, cell_right)
+
+        base_span = base_spans_by_index.get(base_call.base_index)
+        quality_segment = quality_segments_by_index.get(base_call.base_index)
+        raw_left = None if base_span is None else base_span.left
+        raw_right = None if base_span is None else base_span.right
+        raw_center = (
+            float(base_call.position) if base_span is None else float(base_span.center)
+        )
+
+        columns.append(
+            ChromatogramColumn(
+                column_index=column_index,
+                base_index=base_call.base_index,
+                query_pos=base_call.base_index + 1,
+                base=base_call.base,
+                color=base_call.color,
+                quality=(
+                    None if quality_segment is None else int(quality_segment.quality)
+                ),
+                trace_x=base_call.position,
+                peak_height=_peak_height_for_base_call(raw_view, base_call),
+                is_retained=_is_base_index_retained(
+                    base_index=base_call.base_index,
+                    trim_result=trim_result,
+                    display_orientation=record.orientation,
+                ),
+                cell_left=cell_left,
+                cell_right=cell_right,
+                cell_center=cell_center,
+                raw_left=raw_left,
+                raw_right=raw_right,
+                raw_center=raw_center,
+                channels=(
+                    ()
+                    if base_span is None
+                    else _build_column_channels(
+                        channels=raw_view.channels,
+                        raw_left=base_span.left,
+                        raw_right=base_span.right,
+                        cell_left=cell_left,
+                        cell_right=cell_right,
+                        samples_per_base=samples_per_base,
+                    )
+                ),
+            )
+        )
+
+    return ChromatogramColumnView(
+        is_renderable=True,
+        columns=tuple(columns),
+        trim_boundaries=_resolve_column_trim_boundaries(
+            trim_result=trim_result,
+            base_count=len(columns),
+            cell_width=cell_width,
+            display_orientation=record.orientation,
+        ),
+        cell_width=cell_width,
+        samples_per_base=samples_per_base,
+    )
 
 
 def build_chromatogram_view(
@@ -346,6 +514,143 @@ def _quality_right_edge(
     return _clamp_boundary(
         _midpoint(positions[position_index], positions[position_index + 1]),
         trace_length=trace_length,
+    )
+
+
+def _peak_height_for_base_call(
+    view: ChromatogramView,
+    base_call: ChromatogramBaseCall,
+) -> int | None:
+    for channel in view.channels:
+        if channel.base == base_call.base and base_call.position < len(channel.signal):
+            return channel.signal[base_call.position]
+
+    fallback_heights = [
+        channel.signal[base_call.position]
+        for channel in view.channels
+        if base_call.position < len(channel.signal)
+    ]
+    if not fallback_heights:
+        return None
+    return max(fallback_heights)
+
+
+def _build_column_channels(
+    *,
+    channels: tuple[ChromatogramChannel, ...],
+    raw_left: float,
+    raw_right: float,
+    cell_left: float,
+    cell_right: float,
+    samples_per_base: int,
+) -> tuple[ChromatogramColumnChannel, ...]:
+    if not channels or raw_right <= raw_left:
+        return ()
+
+    x_values = _linspace(cell_left, cell_right, samples_per_base)
+    raw_x_values = _linspace(raw_left, raw_right, samples_per_base)
+    return tuple(
+        ChromatogramColumnChannel(
+            base=channel.base,
+            color=channel.color,
+            x_values=x_values,
+            signal=tuple(
+                _interpolate_signal(channel.signal, raw_x_value)
+                for raw_x_value in raw_x_values
+            ),
+        )
+        for channel in channels
+    )
+
+
+def _interpolate_signal(signal: tuple[int, ...], x_value: float) -> float:
+    if not signal:
+        return 0.0
+    if x_value <= 0:
+        return float(signal[0])
+
+    max_index = len(signal) - 1
+    if x_value >= max_index:
+        return float(signal[max_index])
+
+    left_index = int(math.floor(x_value))
+    right_index = int(math.ceil(x_value))
+    if left_index == right_index:
+        return float(signal[left_index])
+
+    right_weight = x_value - float(left_index)
+    left_weight = 1.0 - right_weight
+    return (
+        float(signal[left_index]) * left_weight
+        + float(signal[right_index]) * right_weight
+    )
+
+
+def _linspace(start: float, end: float, count: int) -> tuple[float, ...]:
+    if count <= 1:
+        return ((_midpoint(start, end)),)
+    step = (end - start) / float(count - 1)
+    return tuple(start + (step * index) for index in range(count))
+
+
+def _display_trim_start(
+    trim_result: TrimResult,
+    *,
+    display_orientation: SequenceOrientation,
+) -> int:
+    if display_orientation == "forward":
+        return trim_result.bases_removed_left
+    return trim_result.bases_removed_right
+
+
+def _is_base_index_retained(
+    *,
+    base_index: int,
+    trim_result: TrimResult | None,
+    display_orientation: SequenceOrientation,
+) -> bool:
+    if trim_result is None:
+        return True
+    if trim_result.trimmed_length <= 0:
+        return False
+
+    display_trim_start = _display_trim_start(
+        trim_result,
+        display_orientation=display_orientation,
+    )
+    display_trim_end = display_trim_start + trim_result.trimmed_length
+    return display_trim_start <= base_index < display_trim_end
+
+
+def _resolve_column_trim_boundaries(
+    *,
+    trim_result: TrimResult | None,
+    base_count: int,
+    cell_width: float,
+    display_orientation: SequenceOrientation,
+) -> ChromatogramTrimBoundaries:
+    if trim_result is None or base_count <= 0:
+        return ChromatogramTrimBoundaries()
+
+    display_trim_start = min(
+        max(
+            _display_trim_start(trim_result, display_orientation=display_orientation), 0
+        ),
+        base_count,
+    )
+    display_trim_end = min(
+        max(display_trim_start + trim_result.trimmed_length, display_trim_start),
+        base_count,
+    )
+    return ChromatogramTrimBoundaries(
+        left=(
+            None if display_trim_start <= 0 else float(display_trim_start) * cell_width
+        ),
+        right=(
+            None
+            if display_trim_end >= base_count
+            else float(display_trim_end) * cell_width
+        ),
     )
 
 

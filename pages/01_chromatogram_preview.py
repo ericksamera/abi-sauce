@@ -5,8 +5,11 @@ from typing import cast
 
 import streamlit as st
 
-from abi_sauce.chromatogram import build_chromatogram_view
-from abi_sauce.chromatogram_figure import build_chromatogram_figure
+from abi_sauce.chromatogram import (
+    build_chromatogram_column_view,
+    build_chromatogram_view,
+)
+from abi_sauce.chromatogram_figure import build_chromatogram_column_figure
 from abi_sauce.export import to_fasta
 from abi_sauce.models import SequenceOrientation
 from abi_sauce.orientation import (
@@ -14,14 +17,13 @@ from abi_sauce.orientation import (
     orient_trim_config_for_display,
     raw_trim_config_from_display,
 )
-from abi_sauce.services.batch import apply_trim_configs
 from abi_sauce.trim_state import (
     BatchTrimState,
     apply_submitted_trim_config,
     build_record_annotations,
     resolve_active_trim_config,
-    resolve_batch_trim_inputs,
 )
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.trimming import TrimConfig
 from abi_sauce.upload_state import get_active_parsed_batch, update_active_parsed_record
 from abi_sauce.viewer_state import (
@@ -218,11 +220,9 @@ if should_refresh_trim_form:
     st.session_state[_SAMPLE_TRIM_FORM_CONFIG_KEY] = active_form_trim_config
     st.session_state[_SAMPLE_TRIM_FORM_ORIENTATION_KEY] = record.orientation
 trim_state = get_batch_trim_state(st.session_state)
-resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    trim_state,
 )
 trim_result = prepared_batch.trim_results[selected_record_name]
 effective_trim_config = resolve_active_trim_config(
@@ -234,7 +234,8 @@ display_bases_removed_left, display_bases_removed_right = orient_left_right_valu
     trim_result.bases_removed_right,
     record.orientation,
 )
-chromatogram_view = build_chromatogram_view(record, trim_result)
+raw_chromatogram_view = build_chromatogram_view(record, trim_result)
+column_chromatogram_view = build_chromatogram_column_view(record, trim_result)
 
 st.toggle(
     "Reverse-complement",
@@ -246,17 +247,17 @@ st.toggle(
     on_change=_apply_orientation_toggle,
 )
 
-if not chromatogram_view.is_renderable:
+if not column_chromatogram_view.is_renderable:
     st.warning("Selected record does not have enough trace data to render a chart.")
     st.write(
         {
-            "render_failure_reason": chromatogram_view.render_failure_reason,
+            "render_failure_reason": column_chromatogram_view.render_failure_reason,
         }
     )
 else:
     theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
-    figure = build_chromatogram_figure(
-        chromatogram_view,
+    figure = build_chromatogram_column_figure(
+        column_chromatogram_view,
         theme_type=theme_type,
     )
     figure.update_layout(
@@ -367,15 +368,16 @@ if debug:
     with st.expander("Chromatogram debug info"):
         st.write(
             {
-                "trace_length": chromatogram_view.trace_length,
+                "trace_length": raw_chromatogram_view.trace_length,
+                "base_columns": column_chromatogram_view.base_count,
                 "channels": [
                     f"{channel.data_key}:{channel.base}"
-                    for channel in chromatogram_view.channels
+                    for channel in raw_chromatogram_view.channels
                 ],
-                "base_calls": len(chromatogram_view.base_calls),
-                "quality_segments": len(chromatogram_view.quality_segments),
-                "left_trim_boundary": chromatogram_view.trim_boundaries.left,
-                "right_trim_boundary": chromatogram_view.trim_boundaries.right,
+                "base_calls": len(raw_chromatogram_view.base_calls),
+                "quality_segments": len(raw_chromatogram_view.quality_segments),
+                "left_trim_boundary": column_chromatogram_view.trim_boundaries.left,
+                "right_trim_boundary": column_chromatogram_view.trim_boundaries.right,
             }
         )
 

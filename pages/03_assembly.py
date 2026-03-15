@@ -24,10 +24,6 @@ from abi_sauce.assembly_state import (
     sync_assembly_session_state,
     update_assembly_definition,
 )
-from abi_sauce.assembly_trace import (
-    build_multi_assembly_trace_view,
-    build_pairwise_assembly_trace_view,
-)
 from abi_sauce.assembly_trace_figure import build_assembly_trace_figure
 from abi_sauce.chromatogram import ChromatogramView, build_chromatogram_view
 from abi_sauce.chromatogram_figure import build_chromatogram_figure
@@ -36,11 +32,14 @@ from abi_sauce.exceptions import ExportError
 from abi_sauce.models import SequenceRecord
 from abi_sauce.services.assembly import (
     ComputedAssembly,
-    compute_saved_assemblies,
     prepare_assembly_download,
 )
-from abi_sauce.services.batch import apply_trim_configs
-from abi_sauce.trim_state import build_record_annotations, resolve_batch_trim_inputs
+from abi_sauce.streamlit_cache import (
+    build_selected_assembly_trace_view,
+    compute_saved_assemblies_for_definitions,
+    prepare_batch_for_trim_state,
+)
+from abi_sauce.trim_state import build_record_annotations
 from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.viewer_state import get_batch_trim_state, sync_viewer_session_state
 
@@ -759,13 +758,11 @@ if not assembly_definitions_by_id:
         )
     st.stop()
 
-resolved_trim_inputs = resolve_batch_trim_inputs(get_batch_trim_state(st.session_state))
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    get_batch_trim_state(st.session_state),
 )
-computed_assemblies = compute_saved_assemblies(
+computed_assemblies = compute_saved_assemblies_for_definitions(
     prepared_batch,
     tuple(assembly_definitions_by_id.values()),
 )
@@ -923,25 +920,13 @@ if selected_result is None:
 
 consensus_record = selected_computed_assembly.consensus_record
 theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
-if isinstance(selected_result, MultiAssemblyResult):
-    assembly_trace_view = build_multi_assembly_trace_view(
-        result=selected_result,
-        raw_records_by_source_filename=prepared_batch.parsed_records,
-        trim_results_by_source_filename=prepared_batch.trim_results,
-    )
-else:
-    trace_left_source_filename, trace_right_source_filename = (
-        selected_definition.source_filenames
-    )
-    assembly_trace_view = build_pairwise_assembly_trace_view(
-        result=selected_result,
-        left_source_filename=trace_left_source_filename,
-        left_raw_record=prepared_batch.parsed_records[trace_left_source_filename],
-        left_trim_result=prepared_batch.trim_results[trace_left_source_filename],
-        right_source_filename=trace_right_source_filename,
-        right_raw_record=prepared_batch.parsed_records[trace_right_source_filename],
-        right_trim_result=prepared_batch.trim_results[trace_right_source_filename],
-    )
+assembly_trace_view = build_selected_assembly_trace_view(
+    prepared_batch,
+    selected_computed_assembly,
+)
+if assembly_trace_view is None:
+    st.error("Aligned trace view could not be built for the selected assembly.")
+    st.stop()
 
 st.subheader("Aligned electropherogram view")
 aligned_trace_figure = build_assembly_trace_figure(

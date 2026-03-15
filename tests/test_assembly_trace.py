@@ -8,6 +8,7 @@ from abi_sauce.assembly import (
 from abi_sauce.assembly_trace import (
     build_multi_assembly_trace_view,
     build_pairwise_assembly_trace_view,
+    resolve_assembly_trace_samples_per_cell,
 )
 from abi_sauce.models import SequenceRecord, TraceData
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
@@ -333,3 +334,43 @@ def test_build_multi_assembly_trace_view_builds_one_row_per_included_member() ->
     assert seed_cell.channels == ()
     assert reverse_cell.channels == ()
     assert shifted_cell.has_trace_signal is True
+
+
+def test_resolve_assembly_trace_samples_per_cell_keeps_default_for_small_views() -> (
+    None
+):
+    assert (
+        resolve_assembly_trace_samples_per_cell(
+            alignment_length=24,
+            row_count=2,
+            requested_samples_per_cell=None,
+        )
+        == 16
+    )
+    assert (
+        resolve_assembly_trace_samples_per_cell(
+            alignment_length=24,
+            row_count=2,
+            requested_samples_per_cell=12,
+        )
+        == 12
+    )
+
+
+def test_resolve_assembly_trace_samples_per_cell_reduces_for_large_views() -> None:
+    assert (
+        resolve_assembly_trace_samples_per_cell(
+            alignment_length=400,
+            row_count=2,
+            requested_samples_per_cell=None,
+        )
+        == 8
+    )
+    assert (
+        resolve_assembly_trace_samples_per_cell(
+            alignment_length=200,
+            row_count=6,
+            requested_samples_per_cell=None,
+        )
+        == 8
+    )

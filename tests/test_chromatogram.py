@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from abi_sauce.chromatogram import build_chromatogram_view
+from abi_sauce.chromatogram import (
+    build_chromatogram_column_view,
+    build_chromatogram_view,
+)
 from abi_sauce.models import SequenceOrientation, SequenceRecord, TraceData
 from abi_sauce.trimming import TrimConfig, TrimResult, trim_sequence_record
 
@@ -370,3 +373,78 @@ def test_build_chromatogram_view_reverse_complements_trim_boundaries_and_retaine
     assert view.trim_boundaries.right == 8.5
     assert view.retained_sample_range == (3.0, 8.5)
     assert view.has_any_retained_samples is True
+
+
+def test_build_chromatogram_column_view_projects_trace_onto_unit_width_base_columns() -> (
+    None
+):
+    record = make_record(
+        sequence="ACGT",
+        qualities=[40, 32, 18, 9],
+        trace_data=make_trace_data(base_positions=[2, 4, 6, 8]),
+    )
+    trim_result = trim_sequence_record(
+        record,
+        TrimConfig(left_trim=1, right_trim=1),
+    )
+
+    view = build_chromatogram_column_view(record, trim_result)
+
+    assert view.is_renderable is True
+    assert view.base_count == 4
+    assert view.x_range == (0.0, 4.0)
+    assert tuple(column.base for column in view.columns) == tuple("ACGT")
+    assert tuple(column.query_pos for column in view.columns) == (1, 2, 3, 4)
+    assert tuple(column.cell_left for column in view.columns) == (0.0, 1.0, 2.0, 3.0)
+    assert tuple(column.cell_right for column in view.columns) == (1.0, 2.0, 3.0, 4.0)
+    assert tuple(column.quality for column in view.columns) == (40, 32, 18, 9)
+    assert tuple(column.trace_x for column in view.columns) == (2, 4, 6, 8)
+    assert tuple(column.raw_left for column in view.columns) == (1.0, 3.0, 5.0, 7.0)
+    assert tuple(column.raw_right for column in view.columns) == (3.0, 5.0, 7.0, 9.0)
+    assert tuple(column.is_retained for column in view.columns) == (
+        False,
+        True,
+        True,
+        False,
+    )
+    assert view.trim_boundaries.left == 1.0
+    assert view.trim_boundaries.right == 3.0
+    assert all(len(column.channels) == 4 for column in view.columns)
+    assert all(len(column.channels[0].x_values) == 16 for column in view.columns)
+
+
+def test_build_chromatogram_column_view_respects_reverse_complement_display_space() -> (
+    None
+):
+    record = make_record(
+        sequence="AAGC",
+        qualities=[10, 20, 30, 40],
+        orientation="reverse_complement",
+        trace_data=TraceData(
+            channels={
+                "DATA9": list(range(12)),
+                "DATA10": list(range(12)),
+                "DATA11": list(range(12)),
+                "DATA12": list(range(12)),
+            },
+            base_positions=[1, 4, 7, 9],
+            channel_order="GATC",
+        ),
+    )
+    trim_result = trim_sequence_record(
+        record,
+        TrimConfig(left_trim=1, right_trim=1),
+    )
+
+    view = build_chromatogram_column_view(record, trim_result)
+
+    assert tuple(column.base for column in view.columns) == ("G", "C", "T", "T")
+    assert tuple(column.query_pos for column in view.columns) == (1, 2, 3, 4)
+    assert tuple(column.is_retained for column in view.columns) == (
+        False,
+        True,
+        True,
+        False,
+    )
+    assert view.trim_boundaries.left == 1.0
+    assert view.trim_boundaries.right == 3.0

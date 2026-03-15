@@ -6,9 +6,9 @@ from urllib.parse import quote
 import streamlit as st
 
 from abi_sauce.batch_download_ui import render_batch_download_controls
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.viewer_state import get_batch_trim_state
-from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
-from abi_sauce.trim_state import resolve_batch_trim_inputs
+from abi_sauce.services.batch import prepare_batch_download
 
 from abi_sauce.services.batch import (
     UploadedFileLike,
@@ -162,12 +162,9 @@ def _prepare_active_batch():
     if parsed_batch is None or not parsed_batch.parsed_records:
         return None
 
-    trim_state = get_batch_trim_state(st.session_state)
-    resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-    return apply_trim_configs(
+    return prepare_batch_for_trim_state(
         parsed_batch,
-        default_trim_config=resolved_trim_inputs.default_trim_config,
-        trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+        get_batch_trim_state(st.session_state),
     )
 
 

@@ -4,8 +4,7 @@ from plotly.subplots import make_subplots
 
 from abi_sauce.demo_batch import can_load_demo_sample, load_demo_sample
 from abi_sauce.models import SequenceRecord
-from abi_sauce.services.batch import apply_trim_configs
-from abi_sauce.trim_state import resolve_batch_trim_inputs
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.viewer_state import get_batch_trim_state
 
@@ -270,12 +269,9 @@ if parsed_batch is None:
         st.caption("Demo sample unavailable: tests/fixtures/example.ab1 was not found.")
     st.stop()
 
-trim_state = get_batch_trim_state(st.session_state)
-resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    get_batch_trim_state(st.session_state),
 )
 
 

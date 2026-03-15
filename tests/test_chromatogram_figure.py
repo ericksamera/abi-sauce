@@ -5,11 +5,17 @@ import pytest
 from abi_sauce.chromatogram import (
     ChromatogramBaseCall,
     ChromatogramChannel,
+    ChromatogramColumn,
+    ChromatogramColumnChannel,
+    ChromatogramColumnView,
     ChromatogramQualitySegment,
     ChromatogramTrimBoundaries,
     ChromatogramView,
 )
-from abi_sauce.chromatogram_figure import build_chromatogram_figure
+from abi_sauce.chromatogram_figure import (
+    build_chromatogram_column_figure,
+    build_chromatogram_figure,
+)
 
 
 def make_view(
@@ -64,6 +70,83 @@ def make_view(
         trim_boundaries=trim_boundaries or ChromatogramTrimBoundaries(),
         retained_sample_range=retained_sample_range,
         has_any_retained_samples=has_any_retained_samples,
+    )
+
+
+def make_column_view(
+    *,
+    retained_flags: tuple[bool, ...] = (True, True),
+) -> ChromatogramColumnView:
+    columns = (
+        ChromatogramColumn(
+            column_index=1,
+            base_index=0,
+            query_pos=1,
+            base="A",
+            color="green",
+            quality=40,
+            trace_x=10,
+            peak_height=12,
+            is_retained=retained_flags[0],
+            cell_left=0.0,
+            cell_right=1.0,
+            cell_center=0.5,
+            raw_left=0.0,
+            raw_right=2.0,
+            raw_center=1.0,
+            channels=(
+                ChromatogramColumnChannel(
+                    base="G",
+                    color="black",
+                    x_values=(0.0, 0.5, 1.0),
+                    signal=(0.0, 6.0, 0.0),
+                ),
+                ChromatogramColumnChannel(
+                    base="A",
+                    color="green",
+                    x_values=(0.0, 0.5, 1.0),
+                    signal=(1.0, 4.0, 1.0),
+                ),
+            ),
+        ),
+        ChromatogramColumn(
+            column_index=2,
+            base_index=1,
+            query_pos=2,
+            base="C",
+            color="blue",
+            quality=28,
+            trace_x=20,
+            peak_height=10,
+            is_retained=retained_flags[1],
+            cell_left=1.0,
+            cell_right=2.0,
+            cell_center=1.5,
+            raw_left=2.0,
+            raw_right=4.0,
+            raw_center=3.0,
+            channels=(
+                ChromatogramColumnChannel(
+                    base="G",
+                    color="black",
+                    x_values=(1.0, 1.5, 2.0),
+                    signal=(0.0, 5.0, 0.0),
+                ),
+                ChromatogramColumnChannel(
+                    base="A",
+                    color="green",
+                    x_values=(1.0, 1.5, 2.0),
+                    signal=(1.0, 3.0, 1.0),
+                ),
+            ),
+        ),
+    )
+    return ChromatogramColumnView(
+        is_renderable=True,
+        columns=columns,
+        trim_boundaries=ChromatogramTrimBoundaries(left=1.0, right=None),
+        cell_width=1.0,
+        samples_per_base=3,
     )
 
 
@@ -254,4 +337,52 @@ def test_build_chromatogram_figure_uses_dark_theme_colors_when_requested() -> No
     assert tuple(quality_trace.marker.color) == (
         "rgba(223, 240, 250, 0.55)",
         "rgba(148, 163, 184, 0.28)",
+    )
+
+
+def test_build_chromatogram_column_figure_adds_unit_width_quality_bars() -> None:
+    figure = build_chromatogram_column_figure(make_column_view())
+
+    assert [trace.name for trace in figure.data] == [
+        "G trace",
+        "A trace",
+        "Called peaks",
+        "Base calls",
+        "Quality scores",
+    ]
+    assert figure.layout.xaxis.title.text == "Base index"
+    quality_trace = next(trace for trace in figure.data if trace.type == "bar")
+    assert tuple(quality_trace.x) == (0.5, 1.5)
+    assert tuple(quality_trace.width) == (1.0, 1.0)
+    assert tuple(figure.data[3].textfont.color) == ("green", "blue")
+
+
+def test_build_chromatogram_column_figure_mutes_trimmed_columns_and_overlays_retained_columns() -> (
+    None
+):
+    figure = build_chromatogram_column_figure(
+        make_column_view(retained_flags=(True, False))
+    )
+
+    assert [trace.name for trace in figure.data] == [
+        "G trace",
+        "G trace (retained)",
+        "A trace",
+        "A trace (retained)",
+        "Called peaks",
+        "Base calls",
+        "Quality scores",
+    ]
+    assert figure.data[0].line.color == "rgba(0, 0, 0, 0.40)"
+    assert figure.data[1].line.color == "black"
+    assert figure.data[2].line.color == "rgba(0, 128, 0, 0.45)"
+    assert figure.data[3].line.color == "green"
+    assert tuple(figure.data[5].textfont.color) == (
+        "green",
+        "rgba(0, 0, 255, 0.45)",
+    )
+    quality_trace = next(trace for trace in figure.data if trace.type == "bar")
+    assert tuple(quality_trace.marker.color) == (
+        "rgba(223, 240, 250, 0.95)",
+        "rgba(190, 190, 190, 0.45)",
     )
