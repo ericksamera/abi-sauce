@@ -6,11 +6,10 @@ from urllib.parse import quote
 import streamlit as st
 
 from abi_sauce.batch_download_ui import render_batch_download_controls
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.viewer_state import get_batch_trim_state
-from abi_sauce.services.batch import apply_trim_configs, prepare_batch_download
-from abi_sauce.trim_state import resolve_batch_trim_inputs
-
-from abi_sauce.services.batch import (
+from abi_sauce.services.batch_export import prepare_batch_download
+from abi_sauce.services.batch_parse import (
     UploadedFileLike,
     build_batch_signature,
     normalize_uploaded_files,
@@ -26,6 +25,7 @@ from abi_sauce.upload_state import (
 )
 from abi_sauce.viewer_state import clear_viewer_session_state
 from abi_sauce.assembly_state import clear_assembly_session_state
+from abi_sauce.alignment_state import clear_alignment_session_state
 
 _UPLOADER_NONCE_SESSION_KEY = "abi_sauce.uploader_nonce"
 _UPLOADER_KEY_PREFIX = "abi_sauce.active_batch_uploads"
@@ -60,6 +60,7 @@ def _clear_active_batch_and_uploader() -> None:
     clear_active_batch(st.session_state)
     clear_viewer_session_state(st.session_state)
     clear_assembly_session_state(st.session_state)
+    clear_alignment_session_state(st.session_state)
     _bump_uploader_nonce()
 
 
@@ -162,12 +163,9 @@ def _prepare_active_batch():
     if parsed_batch is None or not parsed_batch.parsed_records:
         return None
 
-    trim_state = get_batch_trim_state(st.session_state)
-    resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-    return apply_trim_configs(
+    return prepare_batch_for_trim_state(
         parsed_batch,
-        default_trim_config=resolved_trim_inputs.default_trim_config,
-        trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+        get_batch_trim_state(st.session_state),
     )
 
 
@@ -232,14 +230,9 @@ if active_parsed_batch is not None and active_parsed_batch.parsed_records:
                 icon=":material/biotech:",
             ),
             st.Page(
-                "pages/00_upload_and_parse.py",
-                title="Batch Viewer",
-                icon=":material/view_list:",
-            ),
-            st.Page(
-                "pages/02_reference_alignment.py",
-                title="Reference Alignment",
-                icon=":material/compare_arrows:",
+                "pages/04_alignments.py",
+                title="Alignments",
+                icon=":material/account_tree:",
             ),
             st.Page(
                 "pages/03_assembly.py",
@@ -256,7 +249,7 @@ current_page = st.navigation(
 
 st.sidebar.title(":apple: abi-sauce")
 st.sidebar.caption(
-    "Use the shared active batch across Home, Sample Viewer, Batch Viewer, and Assembly."
+    "Use the shared active batch across Home, Sample Viewer, Alignments, and Assembly."
 )
 
 load_button_label = "Upload Files" if active_parsed_batch is None else "Upload Files"

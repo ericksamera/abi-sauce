@@ -4,21 +4,20 @@ import io
 import json
 import zipfile
 
-from abi_sauce.assembly import AssemblyConfig
+from abi_sauce.assembly_types import AssemblyConfig, MultiAssemblyResult
 from abi_sauce.assembly_state import AssemblyDefinition
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
-from abi_sauce.services.assembly import (
-    accepted_consensus_records,
+from abi_sauce.services.assembly_compute import (
     compute_saved_assemblies,
     compute_saved_assembly,
+)
+from abi_sauce.services.assembly_export import (
+    accepted_consensus_records,
     prepare_assembly_download,
     select_assembly_export,
 )
-from abi_sauce.services.batch import (
-    ParsedBatch,
-    apply_trim_configs,
-    build_batch_signature,
-)
+from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
+from abi_sauce.services.batch_trim import apply_trim_configs
 from abi_sauce.trimming import TrimConfig
 
 
@@ -102,6 +101,27 @@ def test_compute_saved_assembly_returns_named_consensus_record() -> None:
     assert computed_assembly.consensus_record is not None
     assert computed_assembly.consensus_record.name == "Amplicon A"
     assert computed_assembly.consensus_record.sequence == "CCCCAAAAC"
+
+
+def test_compute_saved_assembly_returns_multi_result_for_multi_definition() -> None:
+    prepared_batch = make_prepared_batch()
+    definition = AssemblyDefinition(
+        assembly_id="assembly-multi",
+        name="Multi",
+        source_filenames=("left.ab1", "right.ab1", "short.ab1"),
+        config=AssemblyConfig(min_overlap_length=4, min_percent_identity=90.0),
+        engine_kind="multi",
+    )
+
+    computed_assembly = compute_saved_assembly(prepared_batch, definition)
+
+    assert computed_assembly.status == "ok"
+    assert isinstance(computed_assembly.result, MultiAssemblyResult)
+    assert computed_assembly.consensus_record is not None
+    assert computed_assembly.consensus_record.sequence == "CCCCAAAAC"
+    assert computed_assembly.result.included_member_count == 2
+    assert computed_assembly.result.excluded_member_count == 1
+    assert computed_assembly.result.members[2].included is False
 
 
 def test_compute_saved_assembly_rejects_invalid_pairwise_definition() -> None:

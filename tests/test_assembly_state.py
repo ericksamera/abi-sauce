@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abi_sauce.assembly import AssemblyConfig
+from abi_sauce.assembly_types import AssemblyConfig
 from abi_sauce.assembly_state import (
     AssemblyDefinition,
     AssemblySessionState,
@@ -15,7 +15,7 @@ from abi_sauce.assembly_state import (
     update_assembly_definition,
 )
 from abi_sauce.models import SequenceUpload
-from abi_sauce.services.batch import build_batch_signature
+from abi_sauce.services.batch_parse import build_batch_signature
 
 
 def make_signature(*filenames: str):
@@ -144,6 +144,23 @@ def test_setters_and_clear_assembly_session_state() -> None:
 
     clear_assembly_session_state(session_state)
     assert read_assembly_session_state(session_state) == AssemblySessionState()
+
+
+def test_create_assembly_definition_preserves_multi_engine_kind() -> None:
+    session_state: dict[str, object] = {}
+
+    created = create_assembly_definition(
+        session_state,
+        name="Multi assembly",
+        source_filenames=("a.ab1", "b.ab1", "c.ab1"),
+        config=AssemblyConfig(),
+        engine_kind="multi",
+    )
+
+    assembly_state = read_assembly_session_state(session_state)
+
+    assert created.engine_kind == "multi"
+    assert assembly_state.assemblies_by_id[created.assembly_id].engine_kind == "multi"
 
 
 def test_suggest_assembly_name_dedupes_against_existing_names() -> None:

@@ -5,13 +5,19 @@ from urllib.parse import quote
 
 import streamlit as st
 
-from abi_sauce.assembly import (
-    AssemblyConfig,
+from abi_sauce.assembly_exports import format_assembly_alignment_fasta
+from abi_sauce.assembly_presenters import (
     assembly_conflicts_to_rows,
     format_assembly_block,
 )
+from abi_sauce.assembly_types import (
+    AssemblyComputationResult,
+    AssemblyConfig,
+    MultiAssemblyResult,
+)
 from abi_sauce.assembly_state import (
     AssemblyDefinition,
+    AssemblyEngineKind,
     create_assembly_definition,
     delete_assembly_definition,
     set_export_selected_assembly_ids,
@@ -20,19 +26,20 @@ from abi_sauce.assembly_state import (
     sync_assembly_session_state,
     update_assembly_definition,
 )
-from abi_sauce.assembly_trace import build_pairwise_assembly_trace_view
 from abi_sauce.assembly_trace_figure import build_assembly_trace_figure
 from abi_sauce.chromatogram import ChromatogramView, build_chromatogram_view
 from abi_sauce.chromatogram_figure import build_chromatogram_figure
 from abi_sauce.export import to_fasta
 from abi_sauce.exceptions import ExportError
-from abi_sauce.services.assembly import (
-    ComputedAssembly,
-    compute_saved_assemblies,
-    prepare_assembly_download,
+from abi_sauce.models import SequenceRecord
+from abi_sauce.services.assembly_compute import ComputedAssembly
+from abi_sauce.services.assembly_export import prepare_assembly_download
+from abi_sauce.streamlit_cache import (
+    build_selected_assembly_trace_view,
+    compute_saved_assemblies_for_definitions,
+    prepare_batch_for_trim_state,
 )
-from abi_sauce.services.batch import apply_trim_configs
-from abi_sauce.trim_state import build_record_annotations, resolve_batch_trim_inputs
+from abi_sauce.trim_state import build_record_annotations
 from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.viewer_state import get_batch_trim_state, sync_viewer_session_state
 
@@ -58,12 +65,14 @@ _NEW_READS_WIDGET_KEY = "assembly.dialog.new.reads"
 _NEW_MIN_OVERLAP_WIDGET_KEY = "assembly.dialog.new.min_overlap"
 _NEW_MIN_IDENTITY_WIDGET_KEY = "assembly.dialog.new.min_identity"
 _NEW_QUALITY_MARGIN_WIDGET_KEY = "assembly.dialog.new.quality_margin"
+_NEW_ENGINE_WIDGET_KEY = "assembly.dialog.new.engine_kind"
 
 _EDIT_NAME_WIDGET_KEY_PREFIX = "assembly.dialog.edit.name"
 _EDIT_READS_WIDGET_KEY_PREFIX = "assembly.dialog.edit.reads"
 _EDIT_MIN_OVERLAP_WIDGET_KEY_PREFIX = "assembly.dialog.edit.min_overlap"
 _EDIT_MIN_IDENTITY_WIDGET_KEY_PREFIX = "assembly.dialog.edit.min_identity"
 _EDIT_QUALITY_MARGIN_WIDGET_KEY_PREFIX = "assembly.dialog.edit.quality_margin"
+_EDIT_ENGINE_WIDGET_KEY_PREFIX = "assembly.dialog.edit.engine_kind"
 
 _ALIGNED_TRACE_ROW_HEIGHT_PX = 84
 _ALIGNED_TRACE_BASE_HEIGHT_PX = 72
@@ -150,6 +159,20 @@ def _assembly_select_label(
     return definition.name
 
 
+def _engine_label(engine_kind: AssemblyEngineKind) -> str:
+    return "Pairwise" if engine_kind == "pairwise" else "Multi-read"
+
+
+def _assembly_member_count_valid(
+    engine_kind: AssemblyEngineKind,
+    *,
+    selected_read_count: int,
+) -> bool:
+    if engine_kind == "pairwise":
+        return selected_read_count == 2
+    return selected_read_count >= 2
+
+
 def _default_dialog_name(
     *,
     source_filenames: tuple[str, ...],
@@ -175,19 +198,86 @@ def _assembly_summary_rows(
         rows.append(
             {
                 "assembly": computed_assembly.definition.name,
+                "engine_kind": computed_assembly.definition.engine_kind,
                 "members": ", ".join(computed_assembly.definition.source_filenames),
                 "selected_for_export": assembly_id in export_selected_ids,
                 "status": computed_assembly.status,
                 "status_reason": computed_assembly.status_reason,
                 "right_orientation": (
-                    None if result is None else result.chosen_right_orientation
+                    None
+                    if result is None or isinstance(result, MultiAssemblyResult)
+                    else result.chosen_right_orientation.replace("_", "-")
                 ),
-                "overlap_length": None if result is None else result.overlap_length,
-                "percent_identity": None if result is None else result.percent_identity,
+                "overlap_length": (
+                    None
+                    if result is None or isinstance(result, MultiAssemblyResult)
+                    else result.overlap_length
+                ),
+                "percent_identity": (
+                    None
+                    if result is None or isinstance(result, MultiAssemblyResult)
+                    else result.percent_identity
+                ),
+                "included_members": (
+                    None
+                    if not isinstance(result, MultiAssemblyResult)
+                    else result.included_member_count
+                ),
                 "conflict_count": None if result is None else result.conflict_count,
             }
         )
     return rows
+
+
+def _multi_alignment_rows(result: MultiAssemblyResult) -> list[dict[str, object]]:
+    members_by_index = {
+        member.member_index: member for member in result.members if member.included
+    }
+    return [
+        {
+            "member": f"read {member_index + 1}",
+            "display_name": members_by_index[member_index].display_name,
+            "filename": members_by_index[member_index].source_filename,
+            "is_seed": members_by_index[member_index].is_seed,
+            "aligned_sequence": aligned_sequence,
+        }
+        for member_index, aligned_sequence in zip(
+            result.included_member_indices,
+            result.aligned_member_sequences,
+            strict=True,
+        )
+    ]
+
+
+def _render_consensus_downloads(
+    *,
+    consensus_record: SequenceRecord,
+    result: AssemblyComputationResult,
+) -> None:
+    consensus_fasta = to_fasta(consensus_record, line_width=None)
+    alignment_fasta = format_assembly_alignment_fasta(
+        result,
+        consensus_name=consensus_record.name,
+    )
+
+    st.subheader("Consensus FASTA")
+    st.code(consensus_fasta, wrap_lines=True)
+
+    consensus_col, alignment_col = st.columns(2)
+    with consensus_col:
+        st.download_button(
+            "Download consensus FASTA",
+            data=consensus_fasta,
+            file_name=f"{consensus_record.name}.fasta",
+            mime="text/plain",
+        )
+    with alignment_col:
+        st.download_button(
+            "Download alignment FASTA",
+            data=alignment_fasta,
+            file_name=f"{consensus_record.name}.msa.fasta",
+            mime="text/plain",
+        )
 
 
 def _effective_export_selected_ids(
@@ -377,6 +467,16 @@ def _create_assembly_dialog(
             key=_NEW_READS_WIDGET_KEY,
         ),
     )
+    engine_kind = cast(
+        AssemblyEngineKind,
+        st.selectbox(
+            "Engine",
+            options=["pairwise", "multi"],
+            index=0,
+            format_func=_engine_label,
+            key=_NEW_ENGINE_WIDGET_KEY,
+        ),
+    )
     min_overlap_length = int(
         st.number_input(
             "Minimum overlap length",
@@ -406,9 +506,19 @@ def _create_assembly_dialog(
         )
     )
 
-    pairwise_valid = len(selected_reads) == 2
-    if not pairwise_valid:
+    selection_valid = _assembly_member_count_valid(
+        engine_kind,
+        selected_read_count=len(selected_reads),
+    )
+    if engine_kind == "pairwise" and not selection_valid:
         st.warning("Current pairwise engine requires exactly 2 selected reads.")
+    elif engine_kind == "multi" and not selection_valid:
+        st.warning("Current multi engine requires at least 2 selected reads.")
+    elif engine_kind == "multi":
+        st.caption(
+            "Multi-read assemblies accept 2 or more reads and are computed from the "
+            "current trimmed batch on each rerun."
+        )
 
     save_col, cancel_col = st.columns(2)
     with save_col:
@@ -416,7 +526,7 @@ def _create_assembly_dialog(
             "Create assembly",
             type="primary",
             use_container_width=True,
-            disabled=not pairwise_valid,
+            disabled=not selection_valid,
         )
     with cancel_col:
         cancel_clicked = st.button(
@@ -437,6 +547,7 @@ def _create_assembly_dialog(
                 min_percent_identity=min_percent_identity,
                 quality_margin=quality_margin,
             ),
+            engine_kind=engine_kind,
         )
         st.rerun()
 
@@ -468,6 +579,16 @@ def _edit_assembly_dialog(
             key=f"{_EDIT_READS_WIDGET_KEY_PREFIX}.{definition.assembly_id}",
         ),
     )
+    engine_kind = cast(
+        AssemblyEngineKind,
+        st.selectbox(
+            "Engine",
+            options=["pairwise", "multi"],
+            index=0 if definition.engine_kind == "pairwise" else 1,
+            format_func=_engine_label,
+            key=f"{_EDIT_ENGINE_WIDGET_KEY_PREFIX}.{definition.assembly_id}",
+        ),
+    )
     min_overlap_length = int(
         st.number_input(
             "Minimum overlap length",
@@ -497,9 +618,19 @@ def _edit_assembly_dialog(
         )
     )
 
-    pairwise_valid = len(selected_reads) == 2
-    if not pairwise_valid:
+    selection_valid = _assembly_member_count_valid(
+        engine_kind,
+        selected_read_count=len(selected_reads),
+    )
+    if engine_kind == "pairwise" and not selection_valid:
         st.warning("Current pairwise engine requires exactly 2 selected reads.")
+    elif engine_kind == "multi" and not selection_valid:
+        st.warning("Current multi engine requires at least 2 selected reads.")
+    elif engine_kind == "multi":
+        st.caption(
+            "Multi-read assemblies accept 2 or more reads and are computed from the "
+            "current trimmed batch on each rerun."
+        )
 
     save_col, cancel_col = st.columns(2)
     with save_col:
@@ -507,7 +638,7 @@ def _edit_assembly_dialog(
             "Save changes",
             type="primary",
             use_container_width=True,
-            disabled=not pairwise_valid,
+            disabled=not selection_valid,
             key=f"assembly.dialog.edit.save.{definition.assembly_id}",
         )
     with cancel_col:
@@ -535,6 +666,7 @@ def _edit_assembly_dialog(
                 open_internal_gap_score=definition.config.open_internal_gap_score,
                 extend_internal_gap_score=definition.config.extend_internal_gap_score,
             ),
+            engine_kind=engine_kind,
         )
         st.rerun()
 
@@ -626,13 +758,11 @@ if not assembly_definitions_by_id:
         )
     st.stop()
 
-resolved_trim_inputs = resolve_batch_trim_inputs(get_batch_trim_state(st.session_state))
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    get_batch_trim_state(st.session_state),
 )
-computed_assemblies = compute_saved_assemblies(
+computed_assemblies = compute_saved_assemblies_for_definitions(
     prepared_batch,
     tuple(assembly_definitions_by_id.values()),
 )
@@ -717,25 +847,87 @@ if selected_definition is None:
 selected_computed_assembly = computed_assemblies[selected_definition.assembly_id]
 selected_result = selected_computed_assembly.result
 
+if isinstance(selected_result, MultiAssemblyResult):
+    member_rows = [
+        {
+            "member": f"read {member.member_index + 1}",
+            "filename": member.source_filename,
+            "display_name": member.display_name,
+            "display_orientation": prepared_batch.parsed_records[
+                member.source_filename
+            ].orientation,
+            "trimmed_length": member.trimmed_length,
+            "has_qualities": member.has_qualities,
+            "has_trace_data": member.has_trace_data,
+            "is_seed": member.is_seed,
+            "included": member.included,
+            "chosen_orientation": member.chosen_orientation.replace("_", "-"),
+            "overlap_length": member.overlap_length,
+            "percent_identity": member.percent_identity,
+            "inclusion_reason": member.inclusion_reason,
+        }
+        for member in selected_result.members
+    ]
+else:
+    member_rows = [
+        {
+            "member": f"read {index}",
+            "filename": source_filename,
+            "display_name": prepared_batch.parsed_records[source_filename].name,
+            "display_orientation": prepared_batch.parsed_records[
+                source_filename
+            ].orientation,
+            "trimmed_length": prepared_batch.trim_results[
+                source_filename
+            ].trimmed_length,
+            "has_qualities": prepared_batch.trim_results[
+                source_filename
+            ].record.qualities
+            is not None,
+            "has_trace_data": prepared_batch.parsed_records[source_filename].trace_data
+            is not None,
+        }
+        for index, source_filename in enumerate(
+            selected_definition.source_filenames,
+            start=1,
+        )
+    ]
+
 if selected_result is None:
+    status_message = selected_computed_assembly.status_reason
+    if selected_computed_assembly.status == "ok":
+        st.success(
+            "Assembly candidate passed the current overlap and identity thresholds."
+        )
+    elif selected_computed_assembly.status == "rejected":
+        st.warning(
+            status_message or "Assembly candidate did not pass the current filters."
+        )
+    elif selected_computed_assembly.status == "not_implemented":
+        st.info(status_message or "Assembly engine is not implemented yet.")
+    else:
+        st.error(status_message or "Saved assembly definition could not be resolved.")
+
+    st.write(
+        {
+            "engine_kind": selected_definition.engine_kind,
+            "member_count": len(selected_definition.source_filenames),
+            "status": selected_computed_assembly.status,
+        }
+    )
+    st.dataframe(member_rows, hide_index=True, width="stretch")
     st.stop()
 
-left_source_filename, right_source_filename = selected_definition.source_filenames
-left_raw_record = prepared_batch.parsed_records[left_source_filename]
-right_raw_record = prepared_batch.parsed_records[right_source_filename]
-left_trim_result = prepared_batch.trim_results[left_source_filename]
-right_trim_result = prepared_batch.trim_results[right_source_filename]
-
+consensus_record = selected_computed_assembly.consensus_record
 theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
-assembly_trace_view = build_pairwise_assembly_trace_view(
-    result=selected_result,
-    left_source_filename=left_source_filename,
-    left_raw_record=left_raw_record,
-    left_trim_result=left_trim_result,
-    right_source_filename=right_source_filename,
-    right_raw_record=right_raw_record,
-    right_trim_result=right_trim_result,
+assembly_trace_view = build_selected_assembly_trace_view(
+    prepared_batch,
+    selected_computed_assembly,
 )
+if assembly_trace_view is None:
+    st.error("Aligned trace view could not be built for the selected assembly.")
+    st.stop()
+
 st.subheader("Aligned electropherogram view")
 aligned_trace_figure = build_assembly_trace_figure(
     assembly_trace_view,
@@ -762,17 +954,93 @@ st.plotly_chart(
     config={"scrollZoom": False},
 )
 
+status_message = selected_computed_assembly.status_reason
+if selected_computed_assembly.status == "ok":
+    st.success("Assembly candidate passed the current overlap and identity thresholds.")
+elif selected_computed_assembly.status == "rejected":
+    st.warning(status_message or "Assembly candidate did not pass the current filters.")
+elif selected_computed_assembly.status == "not_implemented":
+    st.info(status_message or "Assembly engine is not implemented yet.")
+else:
+    st.error(status_message or "Saved assembly definition could not be resolved.")
 
-consensus_record = selected_computed_assembly.consensus_record
+st.write(
+    {
+        "engine_kind": selected_definition.engine_kind,
+        "member_count": len(selected_definition.source_filenames),
+        "status": selected_computed_assembly.status,
+    }
+)
+st.dataframe(member_rows, hide_index=True, width="stretch")
+
+if isinstance(selected_result, MultiAssemblyResult):
+    seed_member = next(
+        (
+            member
+            for member in selected_result.members
+            if member.member_index == selected_result.seed_member_index
+        ),
+        None,
+    )
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+    with metric_col_1:
+        st.metric(
+            "Seed read",
+            "NA" if seed_member is None else seed_member.display_name,
+        )
+    with metric_col_2:
+        st.metric("Included members", selected_result.included_member_count)
+    with metric_col_3:
+        st.metric("Excluded members", selected_result.excluded_member_count)
+    with metric_col_4:
+        st.metric("Ambiguous columns", selected_result.ambiguous_column_count)
+
+    if selected_result.aligned_member_sequences:
+        with st.expander("Included-member alignments"):
+            st.dataframe(
+                _multi_alignment_rows(selected_result),
+                hide_index=True,
+                width="stretch",
+            )
+
+    if selected_result.columns:
+        with st.expander("Consensus column summary"):
+            st.dataframe(
+                [
+                    {
+                        "column": column.column_index,
+                        "consensus_base": column.consensus_base,
+                        "resolution": column.resolution,
+                        "support_counts": ", ".join(
+                            f"{base}:{count}" for base, count in column.support_counts
+                        ),
+                        "non_gap_members": column.non_gap_member_count,
+                        "gap_members": column.gap_member_count,
+                    }
+                    for column in selected_result.columns
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+
+    if consensus_record is not None and consensus_record.sequence:
+        _render_consensus_downloads(
+            consensus_record=consensus_record,
+            result=selected_result,
+        )
+
+    st.stop()
+
+left_source_filename, right_source_filename = selected_definition.source_filenames
+left_raw_record = prepared_batch.parsed_records[left_source_filename]
+right_raw_record = prepared_batch.parsed_records[right_source_filename]
+left_trim_result = prepared_batch.trim_results[left_source_filename]
+right_trim_result = prepared_batch.trim_results[right_source_filename]
+
 if consensus_record is not None and consensus_record.sequence:
-    consensus_fasta = to_fasta(consensus_record, line_width=None)
-    st.subheader("Consensus FASTA")
-    st.code(consensus_fasta, wrap_lines=True)
-    st.download_button(
-        "Download consensus FASTA",
-        data=consensus_fasta,
-        file_name=f"{consensus_record.name}.fasta",
-        mime="text/plain",
+    _render_consensus_downloads(
+        consensus_record=consensus_record,
+        result=selected_result,
     )
 
 debug = False
@@ -787,50 +1055,15 @@ if debug:
         width="stretch",
     )
 
-    member_rows = [
-        {
-            "member": f"read {index}",
-            "filename": source_filename,
-            "display_name": prepared_batch.parsed_records[source_filename].name,
-            "display_orientation": prepared_batch.parsed_records[
-                source_filename
-            ].orientation,
-            "trimmed_length": prepared_batch.trim_results[
-                source_filename
-            ].trimmed_length,
-            "has_qualities": prepared_batch.trim_results[
-                source_filename
-            ].record.qualities
-            is not None,
-            "has_trace_data": prepared_batch.parsed_records[source_filename].trace_data
-            is not None,
-        }
-        for index, source_filename in enumerate(
-            selected_definition.source_filenames,
-            start=1,
-        )
-    ]
     st.subheader("Assembly members")
     st.dataframe(member_rows, hide_index=True, width="stretch")
 
-    if selected_computed_assembly.status == "ok":
-        st.success(
-            "Assembly candidate passed the current overlap and identity thresholds."
-        )
-    elif selected_computed_assembly.status == "rejected":
-        st.warning(
-            selected_computed_assembly.status_reason
-            or "Assembly candidate did not pass the current filters."
-        )
-    else:
-        st.error(
-            selected_computed_assembly.status_reason
-            or "Saved assembly definition could not be resolved."
-        )
-
     metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
     with metric_col_1:
-        st.metric("Right orientation", selected_result.chosen_right_orientation)
+        st.metric(
+            "Right orientation",
+            selected_result.chosen_right_orientation.replace("_", "-"),
+        )
     with metric_col_2:
         st.metric(
             "Score",

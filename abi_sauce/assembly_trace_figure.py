@@ -5,7 +5,7 @@ from typing import Final
 
 import plotly.graph_objects as go
 
-from abi_sauce.assembly import ConflictResolution
+from abi_sauce.assembly_types import ConflictResolution
 from abi_sauce.assembly_trace import (
     AssemblyTraceCell,
     AssemblyTraceChannelSegment,
@@ -56,6 +56,7 @@ _LIGHT_THEME: Final[AssemblyTraceFigureTheme] = AssemblyTraceFigureTheme(
         "concordant": "rgba(34, 197, 94, 0.08)",
         "single_read": "rgba(59, 130, 246, 0.10)",
         "quality_resolved": "rgba(245, 158, 11, 0.14)",
+        "majority_resolved": "rgba(168, 85, 247, 0.14)",
         "ambiguous": "rgba(239, 68, 68, 0.14)",
     },
 )
@@ -84,6 +85,7 @@ _DARK_THEME: Final[AssemblyTraceFigureTheme] = AssemblyTraceFigureTheme(
         "concordant": "rgba(34, 197, 94, 0.12)",
         "single_read": "rgba(59, 130, 246, 0.14)",
         "quality_resolved": "rgba(245, 158, 11, 0.18)",
+        "majority_resolved": "rgba(168, 85, 247, 0.18)",
         "ambiguous": "rgba(239, 68, 68, 0.18)",
     },
 )
@@ -241,25 +243,9 @@ def _add_consensus_band(
             mode="markers",
             name="Consensus hover",
             showlegend=False,
-            customdata=[
-                [
-                    column.column_index,
-                    column.left_base,
-                    column.right_base,
-                    column.consensus_base,
-                    column.resolution,
-                ]
-                for column in view.columns
-            ],
+            customdata=[column.hover_text for column in view.columns],
             marker={"size": 14, "opacity": 0},
-            hovertemplate=(
-                "column=%{customdata[0]}"
-                "<br>left=%{customdata[1]}"
-                "<br>right=%{customdata[2]}"
-                "<br>consensus=%{customdata[3]}"
-                "<br>resolution=%{customdata[4]}"
-                "<extra></extra>"
-            ),
+            hovertemplate="%{customdata}<extra></extra>",
         )
     )
 

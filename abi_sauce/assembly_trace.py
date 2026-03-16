@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from abi_sauce.assembly import (
+from abi_sauce.assembly_types import (
     AssemblyColumn,
     AssemblyResult,
     AssemblyStrand,
     ConflictResolution,
+    MultiAssemblyColumn,
+    MultiAssemblyResult,
 )
 from abi_sauce.chromatogram import (
     ChromatogramBaseCall,
@@ -17,8 +19,15 @@ from abi_sauce.chromatogram import (
     build_chromatogram_view,
     reverse_complement_chromatogram_view,
 )
-from abi_sauce.models import SequenceOrientation, SequenceRecord
+from abi_sauce.models import SequenceRecord
+from abi_sauce.signal_sampling import resample_signal_window
+from abi_sauce.trace_coordinates import oriented_trim_interval
 from abi_sauce.trimming import TrimResult
+
+_DEFAULT_SAMPLES_PER_CELL = 16
+_REDUCED_SAMPLES_PER_CELL = 8
+_ADAPTIVE_REDUCED_ALIGNMENT_LENGTH = 400
+_ADAPTIVE_REDUCED_TOTAL_CELLS = 1200
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,8 +70,18 @@ class AssemblyTraceCell:
 
 
 @dataclass(frozen=True, slots=True)
+class AssemblyTraceColumn:
+    """One generic alignment column summary for the stacked trace view."""
+
+    column_index: int
+    consensus_base: str
+    resolution: ConflictResolution
+    hover_text: str
+
+
+@dataclass(frozen=True, slots=True)
 class AssemblyTraceRow:
-    """One stacked aligned-trace row for a pairwise assembly member."""
+    """One stacked aligned-trace row for an assembly member."""
 
     label: str
     source_filename: str
@@ -82,9 +101,9 @@ class AssemblyTraceRow:
 
 @dataclass(frozen=True, slots=True)
 class AssemblyTraceView:
-    """Pure aligned-trace view state for a pairwise assembly."""
+    """Pure aligned-trace view state for pairwise or multi-read assembly."""
 
-    columns: tuple[AssemblyColumn, ...] = ()
+    columns: tuple[AssemblyTraceColumn, ...] = ()
     rows: tuple[AssemblyTraceRow, ...] = ()
     cell_width: float = 1.0
     samples_per_cell: int = 16
@@ -107,7 +126,7 @@ class AssemblyTraceView:
 
 
 @dataclass(frozen=True, slots=True)
-class _AssemblyTraceRowSource:
+class AssemblyTraceRowSource:
     view: ChromatogramView
     trimmed_start: int
     trimmed_length: int
@@ -124,6 +143,8 @@ class _AssemblyColumnProjection:
     query_pos: int | None
     quality: int | None
     trace_x: int | None
+    is_overlap: bool
+    is_match: bool
 
 
 def build_pairwise_assembly_trace_view(
@@ -136,30 +157,52 @@ def build_pairwise_assembly_trace_view(
     right_raw_record: SequenceRecord,
     right_trim_result: TrimResult,
     cell_width: float = 1.0,
-    samples_per_cell: int = 16,
+    samples_per_cell: int | None = None,
     trace_row_height: float = 3.0,
+    left_row_source: AssemblyTraceRowSource | None = None,
+    right_row_source: AssemblyTraceRowSource | None = None,
 ) -> AssemblyTraceView:
     """Build a stacked alignment-column trace view for one pairwise assembly."""
-    if cell_width <= 0:
-        raise ValueError("cell_width must be > 0")
-    if samples_per_cell < 2:
-        raise ValueError("samples_per_cell must be >= 2")
-    if trace_row_height <= 0:
-        raise ValueError("trace_row_height must be > 0")
-
-    left_row_source = _build_row_source(
-        raw_record=left_raw_record,
-        trim_result=left_trim_result,
-        strand="forward",
+    columns = _pairwise_trace_columns(result.columns)
+    resolved_samples_per_cell = resolve_assembly_trace_samples_per_cell(
+        alignment_length=len(columns),
+        row_count=2,
+        requested_samples_per_cell=samples_per_cell,
     )
-    right_row_source = _build_row_source(
-        raw_record=right_raw_record,
-        trim_result=right_trim_result,
-        strand=result.chosen_right_orientation,
+    _validate_trace_view_parameters(
+        cell_width=cell_width,
+        samples_per_cell=resolved_samples_per_cell,
+        trace_row_height=trace_row_height,
+    )
+
+    resolved_left_row_source = (
+        build_assembly_trace_row_source(
+            raw_record=left_raw_record,
+            trim_result=left_trim_result,
+            strand="forward",
+        )
+        if left_row_source is None
+        else left_row_source
+    )
+    resolved_right_row_source = (
+        build_assembly_trace_row_source(
+            raw_record=right_raw_record,
+            trim_result=right_trim_result,
+            strand=result.chosen_right_orientation,
+        )
+        if right_row_source is None
+        else right_row_source
     )
 
     row_specs: tuple[
-        tuple[str, str, str, AssemblyStrand, _AssemblyTraceRowSource, bool],
+        tuple[
+            str,
+            str,
+            str,
+            AssemblyStrand,
+            AssemblyTraceRowSource,
+            tuple[_AssemblyColumnProjection, ...],
+        ],
         ...,
     ] = (
         (
@@ -167,29 +210,149 @@ def build_pairwise_assembly_trace_view(
             left_source_filename,
             result.left_display_name,
             "forward",
-            left_row_source,
-            True,
+            resolved_left_row_source,
+            tuple(_left_column_projection(column) for column in result.columns),
         ),
         (
             result.right_display_name,
             right_source_filename,
             result.right_display_name,
             result.chosen_right_orientation,
-            right_row_source,
-            False,
+            resolved_right_row_source,
+            tuple(_right_column_projection(column) for column in result.columns),
         ),
     )
 
+    return _build_trace_view(
+        columns=columns,
+        row_specs=row_specs,
+        cell_width=cell_width,
+        samples_per_cell=resolved_samples_per_cell,
+        trace_row_height=trace_row_height,
+    )
+
+
+def build_multi_assembly_trace_view(
+    *,
+    result: MultiAssemblyResult,
+    raw_records_by_source_filename: dict[str, SequenceRecord],
+    trim_results_by_source_filename: dict[str, TrimResult],
+    cell_width: float = 1.0,
+    samples_per_cell: int | None = None,
+    trace_row_height: float = 3.0,
+    row_sources_by_member_index: dict[int, AssemblyTraceRowSource] | None = None,
+) -> AssemblyTraceView:
+    """Build a stacked alignment-column trace view for one multi-read assembly."""
+    columns = _multi_trace_columns(result.columns)
+    resolved_samples_per_cell = resolve_assembly_trace_samples_per_cell(
+        alignment_length=len(columns),
+        row_count=len(result.included_member_indices),
+        requested_samples_per_cell=samples_per_cell,
+    )
+    _validate_trace_view_parameters(
+        cell_width=cell_width,
+        samples_per_cell=resolved_samples_per_cell,
+        trace_row_height=trace_row_height,
+    )
+
+    members_by_index = {member.member_index: member for member in result.members}
+    row_specs: list[
+        tuple[
+            str,
+            str,
+            str,
+            AssemblyStrand,
+            AssemblyTraceRowSource,
+            tuple[_AssemblyColumnProjection, ...],
+        ]
+    ] = []
+    member_cell_position_by_index = {
+        member_index: position
+        for position, member_index in enumerate(result.included_member_indices)
+    }
+
+    for member_index in result.included_member_indices:
+        member = members_by_index[member_index]
+        row_source = (
+            row_sources_by_member_index[member_index]
+            if row_sources_by_member_index is not None
+            and member_index in row_sources_by_member_index
+            else build_assembly_trace_row_source(
+                raw_record=raw_records_by_source_filename[member.source_filename],
+                trim_result=trim_results_by_source_filename[member.source_filename],
+                strand=member.chosen_orientation,
+            )
+        )
+        row_specs.append(
+            (
+                member.display_name,
+                member.source_filename,
+                member.display_name,
+                member.chosen_orientation,
+                row_source,
+                tuple(
+                    _multi_member_projection(
+                        column,
+                        member_cell_position=member_cell_position_by_index[
+                            member_index
+                        ],
+                    )
+                    for column in result.columns
+                ),
+            )
+        )
+
+    return _build_trace_view(
+        columns=columns,
+        row_specs=tuple(row_specs),
+        cell_width=cell_width,
+        samples_per_cell=resolved_samples_per_cell,
+        trace_row_height=trace_row_height,
+    )
+
+
+def _validate_trace_view_parameters(
+    *,
+    cell_width: float,
+    samples_per_cell: int,
+    trace_row_height: float,
+) -> None:
+    if cell_width <= 0:
+        raise ValueError("cell_width must be > 0")
+    if samples_per_cell < 2:
+        raise ValueError("samples_per_cell must be >= 2")
+    if trace_row_height <= 0:
+        raise ValueError("trace_row_height must be > 0")
+
+
+def _build_trace_view(
+    *,
+    columns: tuple[AssemblyTraceColumn, ...],
+    row_specs: tuple[
+        tuple[
+            str,
+            str,
+            str,
+            AssemblyStrand,
+            AssemblyTraceRowSource,
+            tuple[_AssemblyColumnProjection, ...],
+        ],
+        ...,
+    ],
+    cell_width: float,
+    samples_per_cell: int,
+    trace_row_height: float,
+) -> AssemblyTraceView:
     total_rows = len(row_specs)
     rows = tuple(
         _build_trace_row(
-            columns=result.columns,
+            columns=columns,
             label=label,
             source_filename=source_filename,
             display_name=display_name,
             strand=strand,
             row_source=row_source,
-            is_left_row=is_left_row,
+            projections=projections,
             row_order_index=row_order_index,
             total_rows=total_rows,
             cell_width=cell_width,
@@ -202,12 +365,12 @@ def build_pairwise_assembly_trace_view(
             display_name,
             strand,
             row_source,
-            is_left_row,
+            projections,
         ) in enumerate(row_specs)
     )
 
     return AssemblyTraceView(
-        columns=result.columns,
+        columns=columns,
         rows=rows,
         cell_width=cell_width,
         samples_per_cell=samples_per_cell,
@@ -217,13 +380,13 @@ def build_pairwise_assembly_trace_view(
 
 def _build_trace_row(
     *,
-    columns: tuple[AssemblyColumn, ...],
+    columns: tuple[AssemblyTraceColumn, ...],
     label: str,
     source_filename: str,
     display_name: str,
     strand: AssemblyStrand,
-    row_source: _AssemblyTraceRowSource,
-    is_left_row: bool,
+    row_source: AssemblyTraceRowSource,
+    projections: tuple[_AssemblyColumnProjection, ...],
     row_order_index: int,
     total_rows: int,
     cell_width: float,
@@ -236,15 +399,11 @@ def _build_trace_row(
         _build_trace_cell(
             column=column,
             row_source=row_source,
-            projection=(
-                _left_column_projection(column)
-                if is_left_row
-                else _right_column_projection(column)
-            ),
+            projection=projection,
             cell_width=cell_width,
             samples_per_cell=samples_per_cell,
         )
-        for column in columns
+        for column, projection in zip(columns, projections, strict=True)
     )
     return AssemblyTraceRow(
         label=label,
@@ -261,8 +420,8 @@ def _build_trace_row(
 
 def _build_trace_cell(
     *,
-    column: AssemblyColumn,
-    row_source: _AssemblyTraceRowSource,
+    column: AssemblyTraceColumn,
+    row_source: AssemblyTraceRowSource,
     projection: _AssemblyColumnProjection,
     cell_width: float,
     samples_per_cell: int,
@@ -306,8 +465,8 @@ def _build_trace_cell(
         consensus_base=column.consensus_base,
         resolution=column.resolution,
         is_gap=projection.query_index is None or projection.base == "-",
-        is_overlap=column.is_overlap,
-        is_match=column.is_match,
+        is_overlap=projection.is_overlap,
+        is_match=projection.is_match,
         query_index=projection.query_index,
         query_pos=projection.query_pos,
         quality=projection.quality,
@@ -322,17 +481,36 @@ def _build_trace_cell(
     )
 
 
-def _build_row_source(
+def resolve_assembly_trace_samples_per_cell(
+    *,
+    alignment_length: int,
+    row_count: int,
+    requested_samples_per_cell: int | None,
+) -> int:
+    """Return the sampling density for one aligned electropherogram view."""
+    if requested_samples_per_cell is not None:
+        return requested_samples_per_cell
+
+    total_cells = max(alignment_length, 0) * max(row_count, 1)
+    if (
+        alignment_length >= _ADAPTIVE_REDUCED_ALIGNMENT_LENGTH
+        or total_cells >= _ADAPTIVE_REDUCED_TOTAL_CELLS
+    ):
+        return _REDUCED_SAMPLES_PER_CELL
+    return _DEFAULT_SAMPLES_PER_CELL
+
+
+def build_assembly_trace_row_source(
     *,
     raw_record: SequenceRecord,
     trim_result: TrimResult,
     strand: AssemblyStrand,
-) -> _AssemblyTraceRowSource:
+) -> AssemblyTraceRowSource:
     view = build_chromatogram_view(raw_record, trim_result)
     oriented_view = (
         view if strand == "forward" else reverse_complement_chromatogram_view(view)
     )
-    trimmed_start, _trimmed_end = _assembly_oriented_trim_interval(
+    trimmed_start, _trimmed_end = oriented_trim_interval(
         raw_record=raw_record,
         trim_result=trim_result,
         strand=strand,
@@ -349,7 +527,7 @@ def _build_row_source(
         trimmed_start=trimmed_start,
         trimmed_length=trim_result.trimmed_length,
     )
-    return _AssemblyTraceRowSource(
+    return AssemblyTraceRowSource(
         view=oriented_view,
         trimmed_start=trimmed_start,
         trimmed_length=trim_result.trimmed_length,
@@ -358,37 +536,6 @@ def _build_row_source(
         base_spans_by_full_index=base_spans_by_full_index,
         signal_scale=signal_scale,
     )
-
-
-def _assembly_oriented_trim_interval(
-    *,
-    raw_record: SequenceRecord,
-    trim_result: TrimResult,
-    strand: AssemblyStrand,
-) -> tuple[int, int]:
-    display_start = _display_trim_start(
-        trim_result,
-        display_orientation=raw_record.orientation,
-    )
-    display_end = display_start + trim_result.trimmed_length
-    if strand == "forward":
-        return (display_start, display_end)
-
-    full_length = len(raw_record.sequence)
-    return (
-        full_length - display_end,
-        full_length - display_start,
-    )
-
-
-def _display_trim_start(
-    trim_result: TrimResult,
-    *,
-    display_orientation: SequenceOrientation,
-) -> int:
-    if display_orientation == "forward":
-        return trim_result.bases_removed_left
-    return trim_result.bases_removed_right
 
 
 def _row_signal_scale(
@@ -438,56 +585,95 @@ def _build_cell_channels(
     if not channels or raw_right <= raw_left:
         return ()
 
-    x_values = _linspace(cell_left, cell_right, samples_per_cell)
-    raw_x_values = _linspace(raw_left, raw_right, samples_per_cell)
-    scale = signal_scale if signal_scale > 0 else 1.0
+    channel_segments: list[AssemblyTraceChannelSegment] = []
+    for channel in channels:
+        x_values, sampled_signal = resample_signal_window(
+            channel.signal,
+            raw_left=raw_left,
+            raw_right=raw_right,
+            cell_left=cell_left,
+            cell_right=cell_right,
+            sample_count=samples_per_cell,
+            signal_scale=signal_scale,
+            clamp_to_unit=True,
+        )
+        channel_segments.append(
+            AssemblyTraceChannelSegment(
+                base=channel.base,
+                color=channel.color,
+                x_values=x_values,
+                normalized_signal=sampled_signal,
+            )
+        )
+    return tuple(channel_segments)
 
+
+def _pairwise_trace_columns(
+    columns: tuple[AssemblyColumn, ...],
+) -> tuple[AssemblyTraceColumn, ...]:
     return tuple(
-        AssemblyTraceChannelSegment(
-            base=channel.base,
-            color=channel.color,
-            x_values=x_values,
-            normalized_signal=tuple(
-                _clamp_unit(_interpolate_signal(channel.signal, raw_x) / scale)
-                for raw_x in raw_x_values
+        AssemblyTraceColumn(
+            column_index=column.column_index,
+            consensus_base=column.consensus_base,
+            resolution=column.resolution,
+            hover_text=(
+                f"column={column.column_index}"
+                f"<br>left={column.left_base}"
+                f"<br>right={column.right_base}"
+                f"<br>consensus={column.consensus_base}"
+                f"<br>resolution={column.resolution}"
             ),
         )
-        for channel in channels
+        for column in columns
     )
 
 
-def _interpolate_signal(signal: tuple[int, ...], x_value: float) -> float:
-    if not signal:
-        return 0.0
-    if x_value <= 0:
-        return float(signal[0])
-
-    max_index = len(signal) - 1
-    if x_value >= max_index:
-        return float(signal[max_index])
-
-    left_index = int(math.floor(x_value))
-    right_index = int(math.ceil(x_value))
-    if left_index == right_index:
-        return float(signal[left_index])
-
-    right_weight = x_value - float(left_index)
-    left_weight = 1.0 - right_weight
-    return (
-        float(signal[left_index]) * left_weight
-        + float(signal[right_index]) * right_weight
+def _multi_trace_columns(
+    columns: tuple[MultiAssemblyColumn, ...],
+) -> tuple[AssemblyTraceColumn, ...]:
+    return tuple(
+        AssemblyTraceColumn(
+            column_index=column.column_index,
+            consensus_base=column.consensus_base,
+            resolution=column.resolution,
+            hover_text=(
+                f"column={column.column_index}"
+                f"<br>consensus={column.consensus_base}"
+                f"<br>resolution={column.resolution}"
+                f"<br>support={_multi_support_summary(column)}"
+                f"<br>non_gap_members={column.non_gap_member_count}"
+                f"<br>gap_members={column.gap_member_count}"
+            ),
+        )
+        for column in columns
     )
 
 
-def _linspace(start: float, end: float, count: int) -> tuple[float, ...]:
-    if count <= 1:
-        return ((start + end) / 2.0,)
-    step = (end - start) / float(count - 1)
-    return tuple(start + (step * index) for index in range(count))
+def _multi_support_summary(column: MultiAssemblyColumn) -> str:
+    if not column.support_counts:
+        return "NA"
+    return ", ".join(f"{base}:{count}" for base, count in column.support_counts)
 
 
-def _clamp_unit(value: float) -> float:
-    return max(0.0, min(value, 1.0))
+def _multi_member_projection(
+    column: MultiAssemblyColumn,
+    *,
+    member_cell_position: int,
+) -> _AssemblyColumnProjection:
+    member_cell = column.member_cells[member_cell_position]
+    return _AssemblyColumnProjection(
+        base=member_cell.base,
+        query_index=member_cell.query_index,
+        query_pos=member_cell.query_pos,
+        quality=member_cell.quality,
+        trace_x=member_cell.trace_x,
+        is_overlap=column.non_gap_member_count > 1,
+        is_match=(
+            not member_cell.is_gap
+            and member_cell.base == column.consensus_base
+            and column.consensus_base != "N"
+        ),
+    )
 
 
 def _left_column_projection(column: AssemblyColumn) -> _AssemblyColumnProjection:
@@ -497,6 +683,8 @@ def _left_column_projection(column: AssemblyColumn) -> _AssemblyColumnProjection
         query_pos=column.left_query_pos,
         quality=column.left_quality,
         trace_x=column.left_trace_x,
+        is_overlap=column.is_overlap,
+        is_match=column.is_match,
     )
 
 
@@ -507,6 +695,8 @@ def _right_column_projection(column: AssemblyColumn) -> _AssemblyColumnProjectio
         query_pos=column.right_query_pos,
         quality=column.right_quality,
         trace_x=column.right_trace_x,
+        is_overlap=column.is_overlap,
+        is_match=column.is_match,
     )
 
 

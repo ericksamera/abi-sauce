@@ -75,6 +75,10 @@ def test_align_trimmed_read_to_reference_returns_perfect_forward_match() -> None
     assert alignment_result.mismatch_count == 0
     assert alignment_result.insertion_count == 0
     assert alignment_result.deletion_count == 0
+    assert len(alignment_result.columns) == 4
+    assert alignment_result.columns[0].ref_base == "C"
+    assert alignment_result.columns[0].query_base == "C"
+    assert alignment_result.columns[0].event_type == "match"
     assert alignment_events_to_rows(alignment_result) == []
 
 
@@ -93,7 +97,7 @@ def test_align_trimmed_read_to_reference_auto_picks_reverse_complement() -> None
         strand_policy="auto",
     )
 
-    assert alignment_result.strand == "reverse-complement"
+    assert alignment_result.strand == "reverse_complement"
     assert alignment_result.percent_identity == 100.0
     assert alignment_result.aligned_reference == "AAAAC"
     assert alignment_result.aligned_query == "AAAAC"
@@ -142,6 +146,7 @@ def test_alignment_events_include_qscore_and_trace_position_for_mismatch() -> No
     event_rows = alignment_events_to_rows(alignment_result)
 
     assert len(event_rows) == 1
+    assert event_rows[0]["column"] == 4
     assert event_rows[0]["type"] == "mismatch"
     assert event_rows[0]["ref_pos"] == 4
     assert event_rows[0]["query_pos"] == 4
@@ -172,6 +177,7 @@ def test_alignment_events_use_display_trace_coordinates_for_reverse_complement_s
     event_rows = alignment_events_to_rows(alignment_result)
 
     assert len(event_rows) == 1
+    assert event_rows[0]["column"] == 5
     assert event_rows[0]["type"] == "mismatch"
     assert event_rows[0]["query_pos"] == 5
     assert event_rows[0]["trace_x"] == 94

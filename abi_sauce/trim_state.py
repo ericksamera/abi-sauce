@@ -46,16 +46,15 @@ def resolve_batch_trim_inputs(
     trim_state: BatchTrimState,
 ) -> ResolvedBatchTrimInputs:
     """Resolve the effective batch trim inputs for the current UI state."""
+    resolved_default_trim_config = _resolved_global_trim_config(trim_state)
+
     if trim_state.trim_scope == "all":
         return ResolvedBatchTrimInputs(
-            default_trim_config=(
-                trim_state.global_trim_config
-                if trim_state.global_trim_config is not None
-                else DEFAULT_BATCH_TRIM_CONFIG
-            ),
+            default_trim_config=resolved_default_trim_config,
         )
 
     return ResolvedBatchTrimInputs(
+        default_trim_config=resolved_default_trim_config,
         trim_configs_by_name=dict(trim_state.trim_configs_by_record),
     )
 
@@ -130,15 +129,20 @@ def resolve_active_trim_config(
 ) -> TrimConfig:
     """Resolve the trim config that should currently hydrate the form."""
     if trim_state.trim_scope == "all":
-        return (
-            trim_state.global_trim_config
-            if trim_state.global_trim_config is not None
-            else DEFAULT_BATCH_TRIM_CONFIG
-        )
+        return _resolved_global_trim_config(trim_state)
 
-    return trim_state.trim_configs_by_record.get(
-        selected_record_name,
-        TrimConfig(),
+    record_trim_config = trim_state.trim_configs_by_record.get(selected_record_name)
+    if record_trim_config is not None:
+        return record_trim_config
+    return _resolved_global_trim_config(trim_state)
+
+
+def _resolved_global_trim_config(trim_state: BatchTrimState) -> TrimConfig:
+    """Return the stored batch default, falling back to the built-in default."""
+    return (
+        trim_state.global_trim_config
+        if trim_state.global_trim_config is not None
+        else DEFAULT_BATCH_TRIM_CONFIG
     )
 
 

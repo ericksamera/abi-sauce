@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from abi_sauce.models import SequenceUpload
-from abi_sauce.services.batch import parse_uploads
+from abi_sauce.services.batch_parse import parse_uploads
 from abi_sauce.upload_state import set_active_parsed_batch
 from abi_sauce.viewer_state import clear_viewer_session_state
 from abi_sauce.assembly_state import clear_assembly_session_state
+from abi_sauce.alignment_state import clear_alignment_session_state
 
 
 def _repo_root() -> Path:
@@ -29,4 +30,5 @@ def load_demo_sample(session_state) -> None:
     )
     clear_viewer_session_state(session_state)
     clear_assembly_session_state(session_state)
+    clear_alignment_session_state(session_state)
     set_active_parsed_batch(session_state, parse_uploads((upload,)))

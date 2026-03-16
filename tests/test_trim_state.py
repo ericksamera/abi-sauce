@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from abi_sauce.trim_state import (
+    DEFAULT_BATCH_TRIM_CONFIG,
     BatchTrimState,
     apply_submitted_trim_config,
     build_record_annotations,
@@ -83,7 +84,7 @@ def test_resolve_batch_trim_inputs_uses_only_global_config_in_all_mode() -> None
     assert resolved_trim_inputs.trim_configs_by_name == {}
 
 
-def test_resolve_batch_trim_inputs_uses_only_overrides_in_selected_mode() -> None:
+def test_resolve_batch_trim_inputs_preserves_batch_default_in_selected_mode() -> None:
     trim_state = BatchTrimState(
         trim_scope="selected",
         global_trim_config=TrimConfig(left_trim=3),
@@ -92,7 +93,7 @@ def test_resolve_batch_trim_inputs_uses_only_overrides_in_selected_mode() -> Non
 
     resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
 
-    assert resolved_trim_inputs.default_trim_config is None
+    assert resolved_trim_inputs.default_trim_config == TrimConfig(left_trim=3)
     assert resolved_trim_inputs.trim_configs_by_name == {
         "a.ab1": TrimConfig(right_trim=2),
     }
@@ -110,13 +111,10 @@ def test_resolve_active_trim_config_tracks_scope_and_selected_record() -> None:
         trim_configs_by_record=all_scope_state.trim_configs_by_record,
     )
 
-    assert (
-        resolve_active_trim_config(
-            selected_scope_state,
-            selected_record_name="a.ab1",
-        )
-        == TrimConfig()
-    )
+    assert resolve_active_trim_config(
+        selected_scope_state,
+        selected_record_name="a.ab1",
+    ) == TrimConfig(left_trim=3)
     assert resolve_active_trim_config(
         selected_scope_state,
         selected_record_name="b.ab1",
@@ -125,3 +123,21 @@ def test_resolve_active_trim_config_tracks_scope_and_selected_record() -> None:
         all_scope_state,
         selected_record_name="b.ab1",
     ) == TrimConfig(left_trim=3)
+
+
+def test_resolve_active_trim_config_uses_builtin_default_when_global_config_is_none() -> (
+    None
+):
+    trim_state = BatchTrimState(
+        trim_scope="selected",
+        global_trim_config=None,
+        trim_configs_by_record={},
+    )
+
+    assert (
+        resolve_active_trim_config(
+            trim_state,
+            selected_record_name="a.ab1",
+        )
+        == DEFAULT_BATCH_TRIM_CONFIG
+    )

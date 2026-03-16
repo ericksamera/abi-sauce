@@ -5,14 +5,13 @@ from typing import cast
 import streamlit as st
 
 from abi_sauce.batch_download_ui import render_batch_download_controls
-from abi_sauce.services.batch import apply_trim_configs
 from abi_sauce.trim_state import (
     BatchTrimState,
     DEFAULT_BATCH_TRIM_CONFIG,
     TrimScope,
     build_record_annotations,
-    resolve_batch_trim_inputs,
 )
+from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.trimming import TrimConfig
 from abi_sauce.upload_state import get_active_parsed_batch
 from abi_sauce.viewer_state import get_batch_trim_state, sync_viewer_session_state
@@ -188,12 +187,9 @@ with st.form("batch_trim_form"):
 
     st.form_submit_button("Save batch trim defaults", on_click=_apply_global_trim_form)
 
-trim_state = get_batch_trim_state(st.session_state)
-resolved_trim_inputs = resolve_batch_trim_inputs(trim_state)
-prepared_batch = apply_trim_configs(
+prepared_batch = prepare_batch_for_trim_state(
     parsed_batch,
-    default_trim_config=resolved_trim_inputs.default_trim_config,
-    trim_configs_by_name=resolved_trim_inputs.trim_configs_by_name,
+    get_batch_trim_state(st.session_state),
 )
 batch_summary = prepared_batch.batch_summary
 batch_summary_rows = [

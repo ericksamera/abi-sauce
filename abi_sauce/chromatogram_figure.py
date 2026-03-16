@@ -8,6 +8,9 @@ import plotly.graph_objects as go
 from abi_sauce.chromatogram import (
     ChromatogramBaseCall,
     ChromatogramChannel,
+    ChromatogramColumn,
+    ChromatogramColumnChannel,
+    ChromatogramColumnView,
     ChromatogramQualitySegment,
     ChromatogramView,
 )
@@ -258,6 +261,195 @@ def build_chromatogram_figure(
     return figure
 
 
+def build_chromatogram_column_figure(
+    view: ChromatogramColumnView,
+    *,
+    theme_type: str = "light",
+) -> go.Figure:
+    """Build a fixed-width base-column chromatogram figure."""
+    if not view.is_renderable:
+        raise ValueError("Chromatogram column view is not renderable")
+
+    theme = _resolve_figure_theme(theme_type)
+    max_signal = _max_column_signal(view)
+    base_label_y = _base_label_y(max_signal)
+    figure = go.Figure()
+
+    for base in _column_trace_bases(view):
+        _add_column_channel_traces(
+            figure,
+            view=view,
+            base=base,
+            theme=theme,
+        )
+
+    peak_columns = [column for column in view.columns if column.peak_height is not None]
+    if peak_columns:
+        figure.add_trace(
+            go.Scattergl(
+                x=[column.cell_center for column in peak_columns],
+                y=[column.peak_height for column in peak_columns],
+                mode="markers",
+                name="Called peaks",
+                showlegend=False,
+                customdata=[
+                    [
+                        column.base,
+                        column.query_pos,
+                        column.trace_x,
+                        _column_status(column),
+                    ]
+                    for column in peak_columns
+                ],
+                hovertemplate=(
+                    "base=%{customdata[0]}"
+                    "<br>base_index=%{customdata[1]}"
+                    "<br>sample=%{customdata[2]}"
+                    "<br>status=%{customdata[3]}"
+                    "<br>signal=%{y}"
+                    "<extra></extra>"
+                ),
+                marker={"size": 10, "opacity": 0},
+            )
+        )
+
+    figure.add_trace(
+        go.Scattergl(
+            x=[column.cell_center for column in view.columns],
+            y=[base_label_y] * len(view.columns),
+            text=[column.base for column in view.columns],
+            mode="text",
+            name="Base calls",
+            textfont={
+                "color": [_column_text_color(column, theme) for column in view.columns]
+            },
+            customdata=[
+                [column.query_pos, column.trace_x, _column_status(column)]
+                for column in view.columns
+            ],
+            hovertemplate=(
+                "base=%{text}"
+                "<br>base_index=%{customdata[0]}"
+                "<br>sample=%{customdata[1]}"
+                "<br>status=%{customdata[2]}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    quality_columns = [column for column in view.columns if column.quality is not None]
+    if quality_columns:
+        figure.add_trace(
+            go.Bar(
+                x=[column.cell_center for column in quality_columns],
+                y=[column.quality for column in quality_columns],
+                width=[view.cell_width] * len(quality_columns),
+                customdata=[
+                    [
+                        column.query_pos,
+                        column.raw_left,
+                        column.raw_right,
+                        _column_status(column),
+                    ]
+                    for column in quality_columns
+                ],
+                name="Quality scores",
+                yaxis="y2",
+                marker={
+                    "color": [
+                        _column_quality_color(column, theme)
+                        for column in quality_columns
+                    ]
+                },
+                hovertemplate=(
+                    "base_index=%{customdata[0]}"
+                    "<br>left=%{customdata[1]:.1f}"
+                    "<br>right=%{customdata[2]:.1f}"
+                    "<br>status=%{customdata[3]}"
+                    "<br>quality=%{y}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    for boundary in (view.trim_boundaries.left, view.trim_boundaries.right):
+        if boundary is None:
+            continue
+        figure.add_shape(
+            type="line",
+            xref="x",
+            yref="paper",
+            x0=boundary,
+            x1=boundary,
+            y0=0,
+            y1=1,
+            line={
+                "color": theme.trim_marker_color,
+                "width": 1,
+                "dash": "longdash",
+            },
+        )
+
+    tickvals, ticktext = _column_ticks(view)
+    figure.update_xaxes(
+        title_text="Base index",
+        title_font={"color": theme.font_color},
+        tickfont={"color": theme.font_color},
+        range=list(_initial_column_x_range(view)),
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=ticktext,
+        showgrid=False,
+        linecolor=theme.axis_color,
+        rangeslider={
+            "visible": True,
+            "bgcolor": theme.rangeslider_bgcolor,
+            "bordercolor": theme.rangeslider_bordercolor,
+        },
+    )
+    figure.update_yaxes(
+        title_text="Signal intensity",
+        title_font={"color": theme.font_color},
+        tickfont={"color": theme.font_color},
+        range=[0.0, base_label_y * 1.08],
+        showgrid=True,
+        gridcolor=theme.grid_color,
+        linecolor=theme.axis_color,
+        zeroline=False,
+    )
+    figure.update_layout(
+        hovermode="x unified",
+        bargap=0.0,
+        dragmode="pan",
+        showlegend=False,
+        plot_bgcolor=theme.plot_bgcolor,
+        paper_bgcolor=theme.paper_bgcolor,
+        font={"color": theme.font_color},
+    )
+
+    if quality_columns:
+        max_quality = max(
+            column.quality for column in quality_columns if column.quality is not None
+        )
+        figure.update_layout(
+            yaxis2={
+                "title": {
+                    "text": "PHRED quality",
+                    "font": {"color": theme.font_color},
+                },
+                "overlaying": "y",
+                "side": "right",
+                "range": [0.0, max(max_quality * 1.1, 1.0)],
+                "showgrid": False,
+                "zeroline": False,
+                "tickfont": {"color": theme.font_color},
+                "linecolor": theme.axis_color,
+            }
+        )
+
+    return figure
+
+
 def _max_signal(view: ChromatogramView) -> float:
     if not view.channels:
         return 1.0
@@ -466,6 +658,199 @@ def _add_channel_traces(
             hoverinfo="skip",
             hovertemplate=None,
         )
+    )
+
+
+def _max_column_signal(view: ChromatogramColumnView) -> float:
+    signal_values = [
+        max(channel.signal)
+        for column in view.columns
+        for channel in column.channels
+        if channel.signal
+    ]
+    if not signal_values:
+        return 1.0
+    return float(max(signal_values))
+
+
+def _column_trace_bases(view: ChromatogramColumnView) -> tuple[str, ...]:
+    for column in view.columns:
+        if column.channels:
+            return tuple(channel.base for channel in column.channels)
+    return ("G", "A", "T", "C")
+
+
+def _column_channel_segment(
+    column: ChromatogramColumn,
+    *,
+    base: str,
+) -> ChromatogramColumnChannel | None:
+    for channel in column.channels:
+        if channel.base == base:
+            return channel
+    return None
+
+
+def _column_channel_points(
+    view: ChromatogramColumnView,
+    *,
+    base: str,
+    retained_only: bool | None,
+) -> tuple[list[float | None], list[float | None]]:
+    x_values: list[float | None] = []
+    y_values: list[float | None] = []
+    for column in view.columns:
+        include_column = retained_only is None or column.is_retained is retained_only
+        channel = _column_channel_segment(column, base=base)
+        if (
+            not include_column
+            or channel is None
+            or not channel.x_values
+            or not channel.signal
+        ):
+            x_values.append(None)
+            y_values.append(None)
+            continue
+        x_values.extend(channel.x_values)
+        y_values.extend(channel.signal)
+        x_values.append(None)
+        y_values.append(None)
+    return x_values, y_values
+
+
+def _add_column_channel_traces(
+    figure: go.Figure,
+    *,
+    view: ChromatogramColumnView,
+    base: str,
+    theme: ChromatogramFigureTheme,
+) -> None:
+    any_retained = view.has_any_retained_bases
+    any_trimmed = any(not column.is_retained for column in view.columns)
+
+    x_values, y_values = _column_channel_points(
+        view,
+        base=base,
+        retained_only=None,
+    )
+    if any(value is not None for value in y_values):
+        figure.add_trace(
+            go.Scattergl(
+                x=x_values,
+                y=y_values,
+                mode="lines",
+                name=f"{base} trace",
+                line={
+                    "color": _trace_color(
+                        _channel_color_for_base(base),
+                        theme,
+                        muted=any_trimmed or not any_retained,
+                    )
+                },
+                hoverinfo="skip",
+                hovertemplate=None,
+            )
+        )
+
+    if not any_retained or not any_trimmed:
+        return
+
+    retained_x_values, retained_y_values = _column_channel_points(
+        view,
+        base=base,
+        retained_only=True,
+    )
+    if not any(value is not None for value in retained_y_values):
+        return
+
+    figure.add_trace(
+        go.Scattergl(
+            x=retained_x_values,
+            y=retained_y_values,
+            mode="lines",
+            name=f"{base} trace (retained)",
+            showlegend=False,
+            line={"color": _trace_color(_channel_color_for_base(base), theme)},
+            hoverinfo="skip",
+            hovertemplate=None,
+        )
+    )
+
+
+def _channel_color_for_base(base: str) -> str:
+    return {
+        "A": "green",
+        "C": "blue",
+        "G": "black",
+        "T": "red",
+        "N": "magenta",
+    }.get(base.upper(), "magenta")
+
+
+def _column_status(column: ChromatogramColumn) -> str:
+    return "retained" if column.is_retained else "trimmed"
+
+
+def _column_quality_color(
+    column: ChromatogramColumn,
+    theme: ChromatogramFigureTheme,
+) -> str:
+    if column.is_retained:
+        return theme.retained_quality_color
+    return theme.trimmed_quality_color
+
+
+def _column_text_color(
+    column: ChromatogramColumn,
+    theme: ChromatogramFigureTheme,
+) -> str:
+    if column.is_retained:
+        return _trace_color(column.color, theme)
+    return _trace_color(column.color, theme, muted=True)
+
+
+def _initial_column_x_range(view: ChromatogramColumnView) -> tuple[float, float]:
+    full_left, full_right = view.x_range
+    if view.base_count <= 0:
+        return (0.0, 1.0)
+
+    first_visible_column_index = _first_visible_column_index(view)
+    last_visible_column_index = min(
+        first_visible_column_index + _DEFAULT_INITIAL_VISIBLE_BASES - 1,
+        view.base_count - 1,
+    )
+    padding = view.cell_width * _DEFAULT_INITIAL_BASE_PADDING_MULTIPLIER
+    left = max(
+        full_left,
+        view.columns[first_visible_column_index].cell_left - padding,
+    )
+    right = min(
+        full_right,
+        view.columns[last_visible_column_index].cell_right + padding,
+    )
+    if right <= left:
+        return (left, min(full_right, left + max(view.cell_width, 1.0)))
+    return (left, right)
+
+
+def _first_visible_column_index(view: ChromatogramColumnView) -> int:
+    for index, column in enumerate(view.columns):
+        if column.is_retained:
+            return index
+    return 0
+
+
+def _column_ticks(view: ChromatogramColumnView) -> tuple[list[float], list[str]]:
+    if not view.columns:
+        return ([], [])
+
+    tick_step = 10
+    tick_indices = list(range(0, len(view.columns), tick_step))
+    if len(view.columns) <= tick_step:
+        tick_indices = list(range(len(view.columns)))
+    return (
+        [view.columns[index].cell_center for index in tick_indices],
+        [str(view.columns[index].query_pos) for index in tick_indices],
     )
 
 

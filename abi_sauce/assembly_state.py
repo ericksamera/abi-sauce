@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any, Final, Literal, TypeAlias
 from uuid import uuid4
 
-from abi_sauce.assembly import AssemblyConfig
-from abi_sauce.services.batch import BatchSignature
+from abi_sauce.assembly_types import AssemblyConfig
+from abi_sauce.services.batch_parse import BatchSignature
 
-AssemblyEngineKind = Literal["pairwise"]
+AssemblyEngineKind = Literal["pairwise", "multi"]
 
 SessionStateReader: TypeAlias = Any
 SessionStateWriter: TypeAlias = Any

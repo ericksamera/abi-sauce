@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Final, TypeAlias
 
 from abi_sauce.models import SequenceRecord, SequenceUpload
-from abi_sauce.services.batch import (
+from abi_sauce.services.batch_parse import (
     BatchSignature,
     ParsedBatch,
     build_batch_signature,

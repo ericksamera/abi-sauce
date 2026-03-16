@@ -6,7 +6,8 @@ import streamlit as st
 
 from abi_sauce.batch import ExportFormat
 from abi_sauce.exceptions import ExportError
-from abi_sauce.services.batch import PreparedBatch, prepare_batch_download
+from abi_sauce.services.batch_export import prepare_batch_download
+from abi_sauce.services.batch_trim import PreparedBatch
 
 
 def render_batch_download_controls(

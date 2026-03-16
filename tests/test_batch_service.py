@@ -6,9 +6,17 @@ import zipfile
 import hashlib
 import pytest
 
-from abi_sauce.exceptions import ExportError
+from abi_sauce.exceptions import AbiParseError, ExportError
 from abi_sauce.models import SequenceOrientation, SequenceRecord, SequenceUpload
-from abi_sauce.services import batch as batch_service
+from abi_sauce.services.batch_export import prepare_batch_download, select_batch_export
+from abi_sauce.services.batch_parse import (
+    ParsedBatch,
+    build_batch_signature,
+    normalize_uploaded_files,
+    parse_uploaded_batch,
+    replace_parsed_batch_record,
+)
+from abi_sauce.services.batch_trim import apply_trim_config, apply_trim_configs
 from abi_sauce.trimming import TrimConfig
 
 
@@ -44,7 +52,7 @@ def make_record(
 
 
 def test_normalize_uploaded_files_sorts_and_wraps() -> None:
-    uploads = batch_service.normalize_uploaded_files(
+    uploads = normalize_uploaded_files(
         [
             FakeUploadedFile("b.ab1", b"bbb"),
             FakeUploadedFile("a.ab1", b"aa"),
@@ -55,22 +63,19 @@ def test_normalize_uploaded_files_sorts_and_wraps() -> None:
     assert tuple(upload.size_bytes for upload in uploads) == (2, 3)
 
 
-def test_parse_uploaded_batch_collects_records_and_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_parse_uploaded_batch_collects_records_and_errors() -> None:
     def fake_parse_ab1_upload(upload):
         if upload.filename == "broken.ab1":
-            raise batch_service.AbiParseError("Failed to parse ABI file: broken.ab1")
+            raise AbiParseError("Failed to parse ABI file: broken.ab1")
         return make_record(upload.filename.removesuffix(".ab1"))
 
-    monkeypatch.setattr(batch_service, "parse_ab1_upload", fake_parse_ab1_upload)
-
-    parsed_batch = batch_service.parse_uploaded_batch(
+    parsed_batch = parse_uploaded_batch(
         [
             FakeUploadedFile("b.ab1", b"bbb"),
             FakeUploadedFile("broken.ab1", b"x"),
             FakeUploadedFile("a.ab1", b"aa"),
-        ]
+        ],
+        parse_upload=fake_parse_ab1_upload,
     )
 
     assert tuple(upload.filename for upload in parsed_batch.uploads) == (
@@ -97,18 +102,16 @@ def test_build_batch_signature_changes_when_content_changes_but_name_and_size_do
 
     assert first[0].filename == second[0].filename
     assert first[0].size_bytes == second[0].size_bytes
-    assert batch_service.build_batch_signature(
-        first
-    ) != batch_service.build_batch_signature(second)
+    assert build_batch_signature(first) != build_batch_signature(second)
 
 
-def make_parsed_batch() -> batch_service.ParsedBatch:
+def make_parsed_batch() -> ParsedBatch:
     uploads = (
         SequenceUpload(filename="a.ab1", content=b"aaaaaa"),
         SequenceUpload(filename="b.ab1", content=b"bbbb"),
         SequenceUpload(filename="broken.ab1", content=b"x"),
     )
-    return batch_service.ParsedBatch(
+    return ParsedBatch(
         uploads=uploads,
         parsed_records={
             "a.ab1": make_record(
@@ -123,7 +126,7 @@ def make_parsed_batch() -> batch_service.ParsedBatch:
             ),
         },
         parse_errors={"broken.ab1": "Failed to parse ABI file: broken.ab1"},
-        signature=batch_service.build_batch_signature(uploads),
+        signature=build_batch_signature(uploads),
     )
 
 
@@ -138,7 +141,7 @@ def test_replace_parsed_batch_record_replaces_one_record_and_preserves_batch_met
         orientation="reverse_complement",
     )
 
-    updated_batch = batch_service.replace_parsed_batch_record(
+    updated_batch = replace_parsed_batch_record(
         parsed_batch,
         source_filename="a.ab1",
         record=replacement_record,
@@ -153,7 +156,7 @@ def test_replace_parsed_batch_record_replaces_one_record_and_preserves_batch_met
 
 
 def test_apply_trim_configs_supports_per_record_configs() -> None:
-    prepared_batch = batch_service.apply_trim_configs(
+    prepared_batch = apply_trim_configs(
         make_parsed_batch(),
         trim_configs_by_name={
             "a.ab1": TrimConfig(left_trim=2),
@@ -165,7 +168,7 @@ def test_apply_trim_configs_supports_per_record_configs() -> None:
 
 
 def test_apply_trim_configs_supports_default_config_with_per_record_override() -> None:
-    prepared_batch = batch_service.apply_trim_configs(
+    prepared_batch = apply_trim_configs(
         make_parsed_batch(),
         default_trim_config=TrimConfig(left_trim=1),
         trim_configs_by_name={
@@ -182,7 +185,7 @@ def test_apply_trim_configs_supports_default_config_with_per_record_override() -
 def test_apply_trim_config_builds_prepared_batch() -> None:
     parsed_batch = make_parsed_batch()
 
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         parsed_batch,
         TrimConfig(left_trim=1, right_trim=1, min_length=3),
     )
@@ -203,12 +206,12 @@ def test_apply_trim_config_builds_prepared_batch() -> None:
 
 
 def test_select_batch_export_returns_filtered_records_and_reasons() -> None:
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         make_parsed_batch(),
         TrimConfig(left_trim=1, right_trim=1, min_length=3),
     )
 
-    export_selection = batch_service.select_batch_export(
+    export_selection = select_batch_export(
         prepared_batch,
         export_format="fastq",
         require_min_length=True,
@@ -223,12 +226,12 @@ def test_select_batch_export_returns_filtered_records_and_reasons() -> None:
 
 
 def test_prepare_batch_download_builds_fastq_artifact() -> None:
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         make_parsed_batch(),
         TrimConfig(left_trim=1, right_trim=1, min_length=3),
     )
 
-    artifact = batch_service.prepare_batch_download(
+    artifact = prepare_batch_download(
         prepared_batch,
         export_format="fastq",
         concatenate_batch=True,
@@ -247,12 +250,12 @@ def test_prepare_batch_download_builds_fastq_artifact() -> None:
 
 
 def test_prepare_batch_download_supports_unwrapped_fasta_output() -> None:
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         make_parsed_batch(),
         TrimConfig(min_length=1),
     )
 
-    artifact = batch_service.prepare_batch_download(
+    artifact = prepare_batch_download(
         prepared_batch,
         export_format="fasta",
         concatenate_batch=True,
@@ -269,7 +272,7 @@ def test_prepare_batch_download_supports_unwrapped_fasta_output() -> None:
 
 def test_prepare_batch_download_applies_orientation_to_fasta_exports() -> None:
     uploads = (SequenceUpload(filename="rc.ab1", content=b"rc"),)
-    parsed_batch = batch_service.ParsedBatch(
+    parsed_batch = ParsedBatch(
         uploads=uploads,
         parsed_records={
             "rc.ab1": make_record(
@@ -279,11 +282,11 @@ def test_prepare_batch_download_applies_orientation_to_fasta_exports() -> None:
             )
         },
         parse_errors={},
-        signature=batch_service.build_batch_signature(uploads),
+        signature=build_batch_signature(uploads),
     )
-    prepared_batch = batch_service.apply_trim_config(parsed_batch, TrimConfig())
+    prepared_batch = apply_trim_config(parsed_batch, TrimConfig())
 
-    artifact = batch_service.prepare_batch_download(
+    artifact = prepare_batch_download(
         prepared_batch,
         export_format="fasta",
         concatenate_batch=True,
@@ -297,12 +300,12 @@ def test_prepare_batch_download_applies_orientation_to_fasta_exports() -> None:
 
 
 def test_prepare_batch_download_builds_zip_artifact() -> None:
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         make_parsed_batch(),
         TrimConfig(left_trim=1, right_trim=1, min_length=3),
     )
 
-    artifact = batch_service.prepare_batch_download(
+    artifact = prepare_batch_download(
         prepared_batch,
         export_format="fasta",
         concatenate_batch=False,
@@ -332,12 +335,12 @@ def test_prepare_batch_download_builds_zip_artifact() -> None:
 def test_prepare_batch_download_returns_empty_artifact_when_nothing_is_eligible() -> (
     None
 ):
-    prepared_batch = batch_service.apply_trim_config(
+    prepared_batch = apply_trim_config(
         make_parsed_batch(),
         TrimConfig(left_trim=1, right_trim=1, min_length=10),
     )
 
-    artifact = batch_service.prepare_batch_download(
+    artifact = prepare_batch_download(
         prepared_batch,
         export_format="fastq",
         concatenate_batch=True,
@@ -358,7 +361,7 @@ def test_prepare_batch_download_returns_empty_artifact_when_nothing_is_eligible(
 
 def test_prepare_batch_download_propagates_serializer_errors() -> None:
     uploads = (SequenceUpload(filename="bad.ab1", content=b"bad"),)
-    parsed_batch = batch_service.ParsedBatch(
+    parsed_batch = ParsedBatch(
         uploads=uploads,
         parsed_records={
             "bad.ab1": make_record(
@@ -368,15 +371,15 @@ def test_prepare_batch_download_propagates_serializer_errors() -> None:
             )
         },
         parse_errors={},
-        signature=batch_service.build_batch_signature(uploads),
+        signature=build_batch_signature(uploads),
     )
-    prepared_batch = batch_service.apply_trim_config(parsed_batch, TrimConfig())
+    prepared_batch = apply_trim_config(parsed_batch, TrimConfig())
 
     with pytest.raises(
         ExportError,
         match=r"FASTQ export requires PHRED scores between 0 and 93",
     ):
-        batch_service.prepare_batch_download(
+        prepare_batch_download(
             prepared_batch,
             export_format="fastq",
             concatenate_batch=True,
