@@ -26,6 +26,7 @@ from abi_sauce.upload_state import (
 from abi_sauce.viewer_state import clear_viewer_session_state
 from abi_sauce.assembly_state import clear_assembly_session_state
 from abi_sauce.alignment_state import clear_alignment_session_state
+from abi_sauce.reference_library_state import clear_reference_library_state
 
 _UPLOADER_NONCE_SESSION_KEY = "abi_sauce.uploader_nonce"
 _UPLOADER_KEY_PREFIX = "abi_sauce.active_batch_uploads"
@@ -61,6 +62,7 @@ def _clear_active_batch_and_uploader() -> None:
     clear_viewer_session_state(st.session_state)
     clear_assembly_session_state(st.session_state)
     clear_alignment_session_state(st.session_state)
+    clear_reference_library_state(st.session_state)
     _bump_uploader_nonce()
 
 

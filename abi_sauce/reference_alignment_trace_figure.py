@@ -97,6 +97,7 @@ _DARK_THEME: Final[ReferenceAlignmentTraceFigureTheme] = (
 _REFERENCE_BAND_HEIGHT: Final[float] = 0.9
 _REFERENCE_BAND_GAP: Final[float] = 0.3
 _DEFAULT_INITIAL_VISIBLE_COLUMNS: Final[int] = 50
+_DEFAULT_INITIAL_COLUMN_PADDING_MULTIPLIER: Final[float] = 1.0
 
 
 def build_reference_alignment_trace_figure(
@@ -513,7 +514,42 @@ def _initial_x_range(view: ReferenceAlignmentTraceView) -> tuple[float, float]:
     )
     if visible_width <= 0:
         return (full_left, full_right)
-    return (full_left, full_left + visible_width)
+
+    first_visible_column_index = _first_visible_column_index(view)
+    if first_visible_column_index is None:
+        return (full_left, full_left + visible_width)
+
+    left = max(
+        full_left,
+        (float(first_visible_column_index - 1) * view.cell_width)
+        - (view.cell_width * _DEFAULT_INITIAL_COLUMN_PADDING_MULTIPLIER),
+    )
+    right = min(full_right, left + visible_width)
+    if right - left < visible_width and right >= full_right:
+        left = max(full_left, right - visible_width)
+    return (left, right)
+
+
+def _first_visible_column_index(
+    view: ReferenceAlignmentTraceView,
+) -> int | None:
+    for column_offset in range(view.alignment_length):
+        if any(
+            row.cells[column_offset].has_trace_signal
+            for row in view.rows
+            if column_offset < len(row.cells)
+        ):
+            return column_offset + 1
+
+    for column_offset in range(view.alignment_length):
+        if any(
+            not row.cells[column_offset].is_gap
+            for row in view.rows
+            if column_offset < len(row.cells)
+        ):
+            return column_offset + 1
+
+    return None
 
 
 def _row_midpoint(row: ReferenceAlignmentTraceRow) -> float:

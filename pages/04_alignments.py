@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import cast
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Protocol, cast
 
 import streamlit as st
 
@@ -22,6 +24,7 @@ from abi_sauce.assembly_presenters import (
 from abi_sauce.assembly_trace_figure import build_assembly_trace_figure
 from abi_sauce.assembly_types import AssemblyConfig, AssemblyResult
 from abi_sauce.export import to_fasta
+from abi_sauce.reference_alignment import normalize_reference
 from abi_sauce.reference_alignment_exports import format_reference_alignment_fasta
 from abi_sauce.reference_alignment_multi_exports import (
     consensus_record_from_reference_multi_result,
@@ -38,6 +41,12 @@ from abi_sauce.reference_alignment_trace_figure import (
     build_reference_alignment_trace_figure,
 )
 from abi_sauce.reference_alignment_types import StrandPolicy
+from abi_sauce.reference_library_state import (
+    StoredReference,
+    get_stored_reference,
+    list_stored_references,
+    store_reference,
+)
 from abi_sauce.services.alignment_compute import (
     ComputedAlignment,
     compute_saved_alignments,
@@ -56,8 +65,12 @@ _SELECTED_EVENT_WIDGET_KEY = "alignments.selected_event_widget"
 _NEW_NAME_WIDGET_KEY = "alignments.dialog.new.name"
 _NEW_READS_WIDGET_KEY = "alignments.dialog.new.reads"
 _NEW_ENGINE_WIDGET_KEY = "alignments.dialog.new.engine_kind"
+_NEW_REFERENCE_SOURCE_WIDGET_KEY = "alignments.dialog.new.reference_source"
+_NEW_EXISTING_REFERENCE_ID_WIDGET_KEY = "alignments.dialog.new.reference_existing_id"
+_NEW_REFERENCE_INPUT_MODE_WIDGET_KEY = "alignments.dialog.new.reference_input_mode"
 _NEW_REFERENCE_NAME_WIDGET_KEY = "alignments.dialog.new.reference_name"
 _NEW_REFERENCE_TEXT_WIDGET_KEY = "alignments.dialog.new.reference_text"
+_NEW_REFERENCE_UPLOAD_WIDGET_KEY = "alignments.dialog.new.reference_upload"
 _NEW_STRAND_POLICY_WIDGET_KEY = "alignments.dialog.new.strand_policy"
 _NEW_MIN_OVERLAP_WIDGET_KEY = "alignments.dialog.new.min_overlap"
 _NEW_MIN_IDENTITY_WIDGET_KEY = "alignments.dialog.new.min_identity"
@@ -66,12 +79,23 @@ _NEW_QUALITY_MARGIN_WIDGET_KEY = "alignments.dialog.new.quality_margin"
 _EDIT_NAME_WIDGET_KEY_PREFIX = "alignments.dialog.edit.name"
 _EDIT_READS_WIDGET_KEY_PREFIX = "alignments.dialog.edit.reads"
 _EDIT_ENGINE_WIDGET_KEY_PREFIX = "alignments.dialog.edit.engine_kind"
+_EDIT_REFERENCE_SOURCE_WIDGET_KEY_PREFIX = "alignments.dialog.edit.reference_source"
+_EDIT_EXISTING_REFERENCE_ID_WIDGET_KEY_PREFIX = (
+    "alignments.dialog.edit.reference_existing_id"
+)
+_EDIT_REFERENCE_INPUT_MODE_WIDGET_KEY_PREFIX = (
+    "alignments.dialog.edit.reference_input_mode"
+)
 _EDIT_REFERENCE_NAME_WIDGET_KEY_PREFIX = "alignments.dialog.edit.reference_name"
 _EDIT_REFERENCE_TEXT_WIDGET_KEY_PREFIX = "alignments.dialog.edit.reference_text"
+_EDIT_REFERENCE_UPLOAD_WIDGET_KEY_PREFIX = "alignments.dialog.edit.reference_upload"
 _EDIT_STRAND_POLICY_WIDGET_KEY_PREFIX = "alignments.dialog.edit.strand_policy"
 _EDIT_MIN_OVERLAP_WIDGET_KEY_PREFIX = "alignments.dialog.edit.min_overlap"
 _EDIT_MIN_IDENTITY_WIDGET_KEY_PREFIX = "alignments.dialog.edit.min_identity"
 _EDIT_QUALITY_MARGIN_WIDGET_KEY_PREFIX = "alignments.dialog.edit.quality_margin"
+
+ReferenceSourceMode = Literal["existing", "new"]
+NewReferenceInputMode = Literal["upload", "paste"]
 
 _ALIGNED_TRACE_ROW_HEIGHT_PX = 84
 _ALIGNED_TRACE_BASE_HEIGHT_PX = 72
@@ -188,6 +212,331 @@ def _default_dialog_name(
         engine_kind=engine_kind,
         reference_name=reference_name,
         existing_names=existing_names,
+    )
+
+
+def _normalized_optional_text(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped_value = value.strip()
+    return stripped_value or None
+
+
+def _selection_index(
+    options: tuple[str, ...],
+    *,
+    current_value: str | None,
+    default_value: str,
+) -> int:
+    resolved_value = (
+        current_value
+        if current_value in options
+        else (default_value if default_value in options else options[0])
+    )
+    return options.index(resolved_value)
+
+
+class _UploadedReferenceLike(Protocol):
+    name: str
+
+    def getvalue(self) -> bytes: ...
+
+
+def _coerce_uploaded_reference(
+    uploaded_reference: object,
+) -> _UploadedReferenceLike | None:
+    if uploaded_reference is None:
+        return None
+    if not hasattr(uploaded_reference, "getvalue"):
+        return None
+    if not hasattr(uploaded_reference, "name"):
+        return None
+    return cast(_UploadedReferenceLike, uploaded_reference)
+
+
+def _uploaded_reference_text(uploaded_reference: object) -> str:
+    uploaded_file = _coerce_uploaded_reference(uploaded_reference)
+    if uploaded_file is None:
+        return ""
+    uploaded_bytes = uploaded_file.getvalue()
+    if not isinstance(uploaded_bytes, bytes):
+        return ""
+    return uploaded_bytes.decode("utf-8", errors="ignore")
+
+
+def _uploaded_reference_name(uploaded_reference: object) -> str | None:
+    uploaded_file = _coerce_uploaded_reference(uploaded_reference)
+    if uploaded_file is None:
+        return None
+    uploaded_name = uploaded_file.name
+    if not isinstance(uploaded_name, str) or not uploaded_name.strip():
+        return None
+    return Path(uploaded_name).stem or None
+
+
+def _raw_reference_has_header(reference_text: str) -> bool:
+    for line in reference_text.splitlines():
+        if line.strip():
+            return line.lstrip().startswith(">")
+    return False
+
+
+def _canonical_reference_input(
+    *,
+    reference_name: str | None,
+    reference_text: str,
+    fallback_name: str | None = None,
+) -> tuple[str, str]:
+    parsed_name, sequence = normalize_reference(reference_text)
+    explicit_name = _normalized_optional_text(reference_name)
+    resolved_name = (
+        explicit_name
+        or (
+            parsed_name
+            if _raw_reference_has_header(reference_text)
+            else _normalized_optional_text(fallback_name)
+        )
+        or parsed_name
+    )
+    return resolved_name, f">{resolved_name}\n{sequence}\n"
+
+
+def _reference_display_label(stored_reference: StoredReference) -> str:
+    _reference_name, reference_sequence = normalize_reference(
+        stored_reference.reference_text
+    )
+    return f"{stored_reference.name} ({len(reference_sequence)} bp)"
+
+
+def _matching_stored_reference_id(
+    stored_references: tuple[StoredReference, ...],
+    *,
+    reference_name: str | None,
+    reference_text: str | None,
+) -> str | None:
+    normalized_reference_text = _normalized_optional_text(reference_text)
+    if normalized_reference_text is None:
+        return None
+    try:
+        _resolved_name, canonical_reference_text = _canonical_reference_input(
+            reference_name=reference_name,
+            reference_text=normalized_reference_text,
+        )
+    except ValueError:
+        return None
+
+    for stored_reference in stored_references:
+        if stored_reference.reference_text == canonical_reference_text:
+            return stored_reference.reference_id
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedReferenceSelection:
+    source_mode: ReferenceSourceMode
+    reference_name: str | None
+    reference_text: str | None
+    is_valid: bool
+
+
+def _render_reference_selection(
+    *,
+    engine_kind: AlignmentEngineKind,
+    stored_references: tuple[StoredReference, ...],
+    reference_source_key: str,
+    existing_reference_id_key: str,
+    reference_input_mode_key: str,
+    reference_name_key: str,
+    reference_text_key: str,
+    reference_upload_key: str,
+    default_reference_name: str | None = None,
+    default_reference_text: str | None = None,
+) -> _ResolvedReferenceSelection:
+    if not _reference_required(engine_kind):
+        return _ResolvedReferenceSelection(
+            source_mode="new",
+            reference_name=None,
+            reference_text=None,
+            is_valid=True,
+        )
+
+    matched_reference_id = _matching_stored_reference_id(
+        stored_references,
+        reference_name=default_reference_name,
+        reference_text=default_reference_text,
+    )
+    source_options: tuple[ReferenceSourceMode, ...]
+    if stored_references:
+        source_options = ("existing", "new")
+    else:
+        source_options = ("new",)
+
+    default_source_mode: ReferenceSourceMode = (
+        "existing"
+        if stored_references
+        and (
+            matched_reference_id is not None
+            or _normalized_optional_text(default_reference_text) is None
+        )
+        else "new"
+    )
+    reference_source = cast(
+        ReferenceSourceMode,
+        st.selectbox(
+            "Reference source",
+            options=list(source_options),
+            index=_selection_index(
+                source_options,
+                current_value=cast(
+                    str | None,
+                    st.session_state.get(reference_source_key),
+                ),
+                default_value=default_source_mode,
+            ),
+            format_func=lambda value: (
+                "Use existing reference"
+                if value == "existing"
+                else "Upload/paste new reference"
+            ),
+            key=reference_source_key,
+        ),
+    )
+
+    if reference_source == "existing":
+        reference_ids = tuple(
+            stored_reference.reference_id for stored_reference in stored_references
+        )
+        selected_reference_id = cast(
+            str,
+            st.selectbox(
+                "Existing reference",
+                options=list(reference_ids),
+                index=_selection_index(
+                    reference_ids,
+                    current_value=cast(
+                        str | None,
+                        st.session_state.get(existing_reference_id_key),
+                    ),
+                    default_value=matched_reference_id or reference_ids[0],
+                ),
+                format_func=lambda reference_id: _reference_display_label(
+                    next(
+                        stored_reference
+                        for stored_reference in stored_references
+                        if stored_reference.reference_id == reference_id
+                    )
+                ),
+                key=existing_reference_id_key,
+            ),
+        )
+        stored_reference = get_stored_reference(
+            st.session_state,
+            reference_id=selected_reference_id,
+        )
+        if stored_reference is None:
+            st.warning("The selected stored reference is no longer available.")
+            return _ResolvedReferenceSelection(
+                source_mode="existing",
+                reference_name=None,
+                reference_text=None,
+                is_valid=False,
+            )
+        return _ResolvedReferenceSelection(
+            source_mode="existing",
+            reference_name=stored_reference.name,
+            reference_text=stored_reference.reference_text,
+            is_valid=True,
+        )
+
+    if not stored_references:
+        st.caption("No stored references are available in this session yet.")
+
+    input_mode_options: tuple[NewReferenceInputMode, ...] = ("upload", "paste")
+    default_input_mode: NewReferenceInputMode = (
+        "paste" if _normalized_optional_text(default_reference_text) else "upload"
+    )
+    input_mode = cast(
+        NewReferenceInputMode,
+        st.selectbox(
+            "New reference input",
+            options=list(input_mode_options),
+            index=_selection_index(
+                input_mode_options,
+                current_value=cast(
+                    str | None,
+                    st.session_state.get(reference_input_mode_key),
+                ),
+                default_value=default_input_mode,
+            ),
+            format_func=lambda value: (
+                "Upload file" if value == "upload" else "Paste text"
+            ),
+            key=reference_input_mode_key,
+        ),
+    )
+    reference_name_value = st.text_input(
+        "Reference name (optional)",
+        value=default_reference_name or "",
+        key=reference_name_key,
+    )
+
+    upload_col, paste_col = st.columns(2)
+    with upload_col:
+        uploaded_reference = st.file_uploader(
+            "Upload FASTA/text reference",
+            type=["fa", "fasta", "txt"],
+            accept_multiple_files=False,
+            key=reference_upload_key,
+            disabled=input_mode != "upload",
+        )
+    with paste_col:
+        pasted_reference_text = st.text_area(
+            "Paste reference sequence",
+            value=default_reference_text or "",
+            key=reference_text_key,
+            height=180,
+            disabled=input_mode != "paste",
+            placeholder="Paste a FASTA record or plain sequence here.",
+        )
+
+    raw_reference_text = (
+        _uploaded_reference_text(uploaded_reference)
+        if input_mode == "upload"
+        else pasted_reference_text
+    )
+    if not raw_reference_text.strip():
+        return _ResolvedReferenceSelection(
+            source_mode="new",
+            reference_name=_normalized_optional_text(reference_name_value),
+            reference_text=None,
+            is_valid=False,
+        )
+
+    try:
+        resolved_reference_name, canonical_reference_text = _canonical_reference_input(
+            reference_name=reference_name_value,
+            reference_text=raw_reference_text,
+            fallback_name=(
+                _uploaded_reference_name(uploaded_reference)
+                if input_mode == "upload"
+                else None
+            ),
+        )
+    except ValueError as exc:
+        st.warning(str(exc))
+        return _ResolvedReferenceSelection(
+            source_mode="new",
+            reference_name=_normalized_optional_text(reference_name_value),
+            reference_text=None,
+            is_valid=False,
+        )
+
+    st.caption(f"Resolved reference: {resolved_reference_name}")
+    return _ResolvedReferenceSelection(
+        source_mode="new",
+        reference_name=resolved_reference_name,
+        reference_text=canonical_reference_text,
+        is_valid=True,
     )
 
 
@@ -328,27 +677,25 @@ def _render_reference_single_result(
         selected_column_index = (
             None if selected_event_row is None else selected_event_row.get("column")
         )
+        resolved_selected_column_index = (
+            int(selected_column_index)
+            if isinstance(selected_column_index, (int, float))
+            else None
+        )
         st.subheader("Aligned electropherogram view")
         aligned_trace_figure = build_reference_alignment_trace_figure(
             trace_view,
             theme_type=theme_type,
-            selected_column_index=(
-                int(selected_column_index)
-                if isinstance(selected_column_index, (int, float))
-                else None
-            ),
+            selected_column_index=resolved_selected_column_index,
         )
-        aligned_trace_figure.update_xaxes(
-            range=_centered_alignment_x_range(
-                alignment_length=trace_view.alignment_length,
-                cell_width=trace_view.cell_width,
-                center_column_index=(
-                    int(selected_column_index)
-                    if isinstance(selected_column_index, (int, float))
-                    else None
-                ),
+        if resolved_selected_column_index is not None:
+            aligned_trace_figure.update_xaxes(
+                range=_centered_alignment_x_range(
+                    alignment_length=trace_view.alignment_length,
+                    cell_width=trace_view.cell_width,
+                    center_column_index=resolved_selected_column_index,
+                )
             )
-        )
         aligned_trace_figure.update_layout(
             height=max(
                 _ALIGNED_TRACE_MIN_HEIGHT_PX,
@@ -451,13 +798,6 @@ def _render_reference_multi_result(
             theme_type=theme_type,
             selected_column_index=None,
         )
-        aligned_trace_figure.update_xaxes(
-            range=_centered_alignment_x_range(
-                alignment_length=trace_view.alignment_length,
-                cell_width=trace_view.cell_width,
-                center_column_index=None,
-            )
-        )
         aligned_trace_figure.update_layout(
             height=max(
                 _ALIGNED_TRACE_MIN_HEIGHT_PX,
@@ -537,6 +877,7 @@ def _create_alignment_dialog(
     record_annotations_by_name: dict[str, str],
     existing_names: tuple[str, ...],
 ) -> None:
+    stored_references = list_stored_references(st.session_state)
     default_reads = tuple(record_names[:2])
     default_engine_kind: AlignmentEngineKind = "pairwise"
     alignment_name = st.text_input(
@@ -568,17 +909,15 @@ def _create_alignment_dialog(
             key=_NEW_READS_WIDGET_KEY,
         ),
     )
-    reference_name = st.text_input(
-        "Reference name (optional)",
-        key=_NEW_REFERENCE_NAME_WIDGET_KEY,
-        disabled=not _reference_required(engine_kind),
-    )
-    reference_text = st.text_area(
-        "Reference sequence",
-        key=_NEW_REFERENCE_TEXT_WIDGET_KEY,
-        height=180,
-        disabled=not _reference_required(engine_kind),
-        placeholder="Paste a FASTA record or plain sequence here for reference-guided modes.",
+    reference_selection = _render_reference_selection(
+        engine_kind=engine_kind,
+        stored_references=stored_references,
+        reference_source_key=_NEW_REFERENCE_SOURCE_WIDGET_KEY,
+        existing_reference_id_key=_NEW_EXISTING_REFERENCE_ID_WIDGET_KEY,
+        reference_input_mode_key=_NEW_REFERENCE_INPUT_MODE_WIDGET_KEY,
+        reference_name_key=_NEW_REFERENCE_NAME_WIDGET_KEY,
+        reference_text_key=_NEW_REFERENCE_TEXT_WIDGET_KEY,
+        reference_upload_key=_NEW_REFERENCE_UPLOAD_WIDGET_KEY,
     )
     strand_policy = cast(
         StrandPolicy,
@@ -627,8 +966,10 @@ def _create_alignment_dialog(
         engine_kind,
         selected_read_count=len(selected_reads),
     )
-    reference_valid = (not _reference_required(engine_kind)) or bool(
-        reference_text.strip()
+    reference_valid = (not _reference_required(engine_kind)) or (
+        reference_selection.is_valid
+        and reference_selection.reference_name is not None
+        and reference_selection.reference_text is not None
     )
     if not selection_valid:
         if engine_kind == "pairwise":
@@ -644,7 +985,7 @@ def _create_alignment_dialog(
                 "Reference-guided multi-read alignment currently requires at least 2 reads."
             )
     elif _reference_required(engine_kind) and not reference_valid:
-        st.warning("Reference-guided modes require reference text.")
+        st.warning("Reference-guided modes require one valid reference.")
     elif engine_kind == "reference_multi":
         st.caption(
             "Shared-reference mode independently places each selected read onto "
@@ -670,6 +1011,21 @@ def _create_alignment_dialog(
         st.rerun()
 
     if save_clicked:
+        reference_name = reference_selection.reference_name
+        reference_text = reference_selection.reference_text
+        if _reference_required(engine_kind):
+            if reference_name is None or reference_text is None:
+                st.warning("Reference-guided modes require one valid reference.")
+                return
+            if reference_selection.source_mode == "new":
+                stored_reference = store_reference(
+                    st.session_state,
+                    name=reference_name,
+                    reference_text=reference_text,
+                )
+                reference_name = stored_reference.name
+                reference_text = stored_reference.reference_text
+
         create_alignment_definition(
             st.session_state,
             name=alignment_name,
@@ -699,6 +1055,7 @@ def _edit_alignment_dialog(
     record_annotations_by_name: dict[str, str],
     existing_names: tuple[str, ...],
 ) -> None:
+    stored_references = list_stored_references(st.session_state)
     alignment_name = st.text_input(
         "Alignment name",
         value=definition.name,
@@ -728,19 +1085,29 @@ def _edit_alignment_dialog(
             key=f"{_EDIT_READS_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
         ),
     )
-    reference_name = st.text_input(
-        "Reference name (optional)",
-        value=definition.reference_name or "",
-        key=f"{_EDIT_REFERENCE_NAME_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
-        disabled=not _reference_required(engine_kind),
-    )
-    reference_text = st.text_area(
-        "Reference sequence",
-        value=definition.reference_text or "",
-        key=f"{_EDIT_REFERENCE_TEXT_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
-        height=180,
-        disabled=not _reference_required(engine_kind),
-        placeholder="Paste a FASTA record or plain sequence here for reference-guided modes.",
+    reference_selection = _render_reference_selection(
+        engine_kind=engine_kind,
+        stored_references=stored_references,
+        reference_source_key=(
+            f"{_EDIT_REFERENCE_SOURCE_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        existing_reference_id_key=(
+            f"{_EDIT_EXISTING_REFERENCE_ID_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        reference_input_mode_key=(
+            f"{_EDIT_REFERENCE_INPUT_MODE_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        reference_name_key=(
+            f"{_EDIT_REFERENCE_NAME_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        reference_text_key=(
+            f"{_EDIT_REFERENCE_TEXT_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        reference_upload_key=(
+            f"{_EDIT_REFERENCE_UPLOAD_WIDGET_KEY_PREFIX}.{definition.alignment_id}"
+        ),
+        default_reference_name=definition.reference_name,
+        default_reference_text=definition.reference_text,
     )
     strand_policy = cast(
         StrandPolicy,
@@ -794,8 +1161,10 @@ def _edit_alignment_dialog(
         engine_kind,
         selected_read_count=len(selected_reads),
     )
-    reference_valid = (not _reference_required(engine_kind)) or bool(
-        reference_text.strip()
+    reference_valid = (not _reference_required(engine_kind)) or (
+        reference_selection.is_valid
+        and reference_selection.reference_name is not None
+        and reference_selection.reference_text is not None
     )
     if not selection_valid:
         if engine_kind == "pairwise":
@@ -811,7 +1180,7 @@ def _edit_alignment_dialog(
                 "Reference-guided multi-read alignment currently requires at least 2 reads."
             )
     elif _reference_required(engine_kind) and not reference_valid:
-        st.warning("Reference-guided modes require reference text.")
+        st.warning("Reference-guided modes require one valid reference.")
     elif engine_kind == "reference_multi":
         st.caption(
             "Shared-reference mode independently places each selected read onto "
@@ -839,6 +1208,21 @@ def _edit_alignment_dialog(
         st.rerun()
 
     if save_clicked:
+        reference_name = reference_selection.reference_name
+        reference_text = reference_selection.reference_text
+        if _reference_required(engine_kind):
+            if reference_name is None or reference_text is None:
+                st.warning("Reference-guided modes require one valid reference.")
+                return
+            if reference_selection.source_mode == "new":
+                stored_reference = store_reference(
+                    st.session_state,
+                    name=reference_name,
+                    reference_text=reference_text,
+                )
+                reference_name = stored_reference.name
+                reference_text = stored_reference.reference_text
+
         update_alignment_definition(
             st.session_state,
             alignment_id=definition.alignment_id,

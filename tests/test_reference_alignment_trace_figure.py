@@ -107,6 +107,41 @@ def test_build_reference_alignment_trace_figure_adds_selected_column_highlight()
     assert selected_shape.x1 == 4.0
 
 
+def test_build_reference_alignment_trace_figure_starts_at_first_trace_column_for_long_reference() -> (
+    None
+):
+    raw_record = make_record(
+        name="long_trace",
+        sequence="AACCGGTT",
+        qualities=[40] * 8,
+        base_positions=[5, 15, 25, 35, 45, 55, 65, 75],
+    )
+    trim_result = trim_sequence_record(raw_record, TrimConfig())
+    result = align_trimmed_read_to_reference(
+        raw_record=raw_record,
+        trim_result=trim_result,
+        reference_text=f">ref\n{'T' * 60}AACCGGTT\n",
+        strand_policy="forward",
+    )
+    trace_view = build_reference_alignment_trace_view(
+        result=result,
+        source_filename="long_trace.ab1",
+        raw_record=raw_record,
+        trim_result=trim_result,
+    )
+
+    figure = build_reference_alignment_trace_figure(trace_view)
+
+    left, right = tuple(figure.layout.xaxis.range)
+    first_trace_column_index = next(
+        cell.column_index for cell in trace_view.rows[0].cells if cell.has_trace_signal
+    )
+
+    assert left > 0.0
+    assert left <= float(first_trace_column_index)
+    assert right <= float(trace_view.alignment_length)
+
+
 def test_build_reference_alignment_trace_figure_uses_dark_theme_colors() -> None:
     trace_view = make_trace_view()
 

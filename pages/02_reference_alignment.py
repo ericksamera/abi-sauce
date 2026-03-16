@@ -299,6 +299,11 @@ if trace_view is not None:
     selected_column_index = (
         None if selected_event_row is None else selected_event_row.get("column")
     )
+    resolved_selected_column_index = (
+        int(selected_column_index)
+        if isinstance(selected_column_index, (int, float))
+        else None
+    )
     st.subheader("Aligned comparison")
     st.caption(
         "Top band shows the reference bases. The lower row shows the aligned "
@@ -308,23 +313,16 @@ if trace_view is not None:
     aligned_trace_figure = build_reference_alignment_trace_figure(
         trace_view,
         theme_type=theme_type,
-        selected_column_index=(
-            int(selected_column_index)
-            if isinstance(selected_column_index, (int, float))
-            else None
-        ),
+        selected_column_index=resolved_selected_column_index,
     )
-    aligned_trace_figure.update_xaxes(
-        range=_centered_alignment_x_range(
-            alignment_length=trace_view.alignment_length,
-            cell_width=trace_view.cell_width,
-            center_column_index=(
-                int(selected_column_index)
-                if isinstance(selected_column_index, (int, float))
-                else None
-            ),
+    if resolved_selected_column_index is not None:
+        aligned_trace_figure.update_xaxes(
+            range=_centered_alignment_x_range(
+                alignment_length=trace_view.alignment_length,
+                cell_width=trace_view.cell_width,
+                center_column_index=resolved_selected_column_index,
+            )
         )
-    )
     aligned_trace_figure.update_layout(
         height=max(
             _ALIGNED_TRACE_MIN_HEIGHT_PX,
