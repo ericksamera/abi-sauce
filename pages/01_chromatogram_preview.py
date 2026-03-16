@@ -82,14 +82,10 @@ def _resolve_sample_form_trim_config(
     *,
     selected_record_name: str,
 ) -> TrimConfig:
-    record_trim_config = trim_state.trim_configs_by_record.get(selected_record_name)
-    if record_trim_config is not None:
-        return record_trim_config
-
-    if trim_state.trim_scope == "all" and trim_state.global_trim_config is not None:
-        return trim_state.global_trim_config
-
-    return TrimConfig()
+    return resolve_active_trim_config(
+        trim_state,
+        selected_record_name=selected_record_name,
+    )
 
 
 def _apply_trim_form() -> None:

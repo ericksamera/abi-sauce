@@ -23,6 +23,7 @@ from abi_sauce.services.batch import (
     apply_trim_configs,
     build_batch_signature,
 )
+import abi_sauce.streamlit_cache as streamlit_cache
 from abi_sauce.streamlit_cache import (
     build_assembly_trace_row_source_for_member,
     build_parsed_batch_cache_key,
@@ -327,12 +328,51 @@ def test_build_assembly_trace_row_source_for_member_matches_direct_builder() -> 
     cached_row_source = build_assembly_trace_row_source_for_member(
         prepared_batch.parsed_records["right.ab1"],
         prepared_batch.trim_results["right.ab1"],
-        strand="reverse-complement",
+        strand="reverse_complement",
     )
     direct_row_source = build_assembly_trace_row_source(
         raw_record=prepared_batch.parsed_records["right.ab1"],
         trim_result=prepared_batch.trim_results["right.ab1"],
-        strand="reverse-complement",
+        strand="reverse_complement",
     )
 
     assert cached_row_source == direct_row_source
+
+
+def test_prepare_batch_for_trim_inputs_reuses_cached_trim_results_for_unchanged_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    st.cache_data.clear()
+    parsed_batch = make_parsed_batch()
+
+    original_trim_sequence_record = streamlit_cache.trim_sequence_record
+    trim_calls: list[tuple[str, TrimConfig]] = []
+
+    def counting_trim_sequence_record(record: SequenceRecord, trim_config: TrimConfig):
+        trim_calls.append((record.name, trim_config))
+        return original_trim_sequence_record(record, trim_config)
+
+    monkeypatch.setattr(
+        streamlit_cache,
+        "trim_sequence_record",
+        counting_trim_sequence_record,
+    )
+
+    prepare_batch_for_trim_inputs(
+        parsed_batch,
+        ResolvedBatchTrimInputs(
+            default_trim_config=TrimConfig(left_trim=1),
+        ),
+    )
+    assert len(trim_calls) == 3
+
+    trim_calls.clear()
+    prepare_batch_for_trim_inputs(
+        parsed_batch,
+        ResolvedBatchTrimInputs(
+            default_trim_config=TrimConfig(left_trim=1),
+            trim_configs_by_name={"short.ab1": TrimConfig(right_trim=2)},
+        ),
+    )
+
+    assert trim_calls == [("short", TrimConfig(right_trim=2))]

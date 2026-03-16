@@ -4,14 +4,13 @@ from typing import cast
 
 import streamlit as st
 
-from abi_sauce.chromatogram import ChromatogramView, build_chromatogram_view
+from abi_sauce.chromatogram import ChromatogramView
 from abi_sauce.chromatogram_figure import build_chromatogram_figure
-from abi_sauce.reference_alignment import (
-    StrandPolicy,
-    align_trimmed_read_to_reference,
-    alignment_events_to_rows,
+from abi_sauce.reference_alignment_presenters import (
     format_alignment_block,
 )
+from abi_sauce.reference_alignment_types import StrandPolicy
+from abi_sauce.services.reference_alignment import compute_reference_alignment
 from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
 from abi_sauce.trim_state import build_record_annotations
 from abi_sauce.upload_state import get_active_parsed_batch
@@ -142,6 +141,9 @@ if trim_result.trimmed_length <= 0:
 
 reference_col, controls_col = st.columns([3, 1])
 
+if st.session_state.get(_STRAND_POLICY_KEY) == "reverse-complement":
+    st.session_state[_STRAND_POLICY_KEY] = "reverse_complement"
+
 with reference_col:
     st.text_area(
         "Reference sequence",
@@ -161,7 +163,8 @@ with controls_col:
         StrandPolicy,
         st.selectbox(
             "Strand policy",
-            options=["auto", "forward", "reverse-complement"],
+            options=["auto", "forward", "reverse_complement"],
+            format_func=lambda value: value.replace("_", "-"),
             key=_STRAND_POLICY_KEY,
         ),
     )
@@ -188,21 +191,23 @@ if not reference_text.strip():
     st.stop()
 
 try:
-    alignment_result = align_trimmed_read_to_reference(
-        raw_record=raw_record,
-        trim_result=trim_result,
+    computed_alignment = compute_reference_alignment(
+        prepared_batch,
+        source_filename=selected_record_name,
         reference_text=reference_text,
         strand_policy=strand_policy,
     )
-except ValueError as exc:
+except (KeyError, ValueError) as exc:
     st.error(str(exc))
     st.stop()
+
+alignment_result = computed_alignment.alignment_result
 
 metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5, metric_col_6 = (
     st.columns(6)
 )
 with metric_col_1:
-    st.metric("Strand", alignment_result.strand)
+    st.metric("Strand", alignment_result.strand.replace("_", "-"))
 with metric_col_2:
     st.metric("Score", f"{alignment_result.score:.1f}")
 with metric_col_3:
@@ -224,7 +229,7 @@ st.caption(
 st.subheader("Gapped alignment")
 st.code(format_alignment_block(alignment_result), wrap_lines=False)
 
-event_rows = alignment_events_to_rows(alignment_result, include_matches=False)
+event_rows = list(computed_alignment.event_rows)
 selected_event_row: dict[str, object] | None = None
 
 st.subheader("Alignment events")
@@ -249,7 +254,7 @@ else:
         "No mismatch or indel events were detected in the best-scoring alignment."
     )
 
-chromatogram_view = build_chromatogram_view(raw_record, trim_result)
+chromatogram_view = computed_alignment.chromatogram_view
 if not chromatogram_view.is_renderable:
     st.warning("Selected record does not have enough trace data to render a chart.")
     st.stop()

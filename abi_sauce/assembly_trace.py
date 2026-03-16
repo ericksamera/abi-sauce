@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from abi_sauce.assembly import (
+from abi_sauce.assembly_types import (
     AssemblyColumn,
     AssemblyResult,
     AssemblyStrand,
@@ -19,7 +19,9 @@ from abi_sauce.chromatogram import (
     build_chromatogram_view,
     reverse_complement_chromatogram_view,
 )
-from abi_sauce.models import SequenceOrientation, SequenceRecord
+from abi_sauce.models import SequenceRecord
+from abi_sauce.signal_sampling import resample_signal_window
+from abi_sauce.trace_coordinates import oriented_trim_interval
 from abi_sauce.trimming import TrimResult
 
 _DEFAULT_SAMPLES_PER_CELL = 16
@@ -508,7 +510,7 @@ def build_assembly_trace_row_source(
     oriented_view = (
         view if strand == "forward" else reverse_complement_chromatogram_view(view)
     )
-    trimmed_start, _trimmed_end = _assembly_oriented_trim_interval(
+    trimmed_start, _trimmed_end = oriented_trim_interval(
         raw_record=raw_record,
         trim_result=trim_result,
         strand=strand,
@@ -534,37 +536,6 @@ def build_assembly_trace_row_source(
         base_spans_by_full_index=base_spans_by_full_index,
         signal_scale=signal_scale,
     )
-
-
-def _assembly_oriented_trim_interval(
-    *,
-    raw_record: SequenceRecord,
-    trim_result: TrimResult,
-    strand: AssemblyStrand,
-) -> tuple[int, int]:
-    display_start = _display_trim_start(
-        trim_result,
-        display_orientation=raw_record.orientation,
-    )
-    display_end = display_start + trim_result.trimmed_length
-    if strand == "forward":
-        return (display_start, display_end)
-
-    full_length = len(raw_record.sequence)
-    return (
-        full_length - display_end,
-        full_length - display_start,
-    )
-
-
-def _display_trim_start(
-    trim_result: TrimResult,
-    *,
-    display_orientation: SequenceOrientation,
-) -> int:
-    if display_orientation == "forward":
-        return trim_result.bases_removed_left
-    return trim_result.bases_removed_right
 
 
 def _row_signal_scale(
@@ -614,56 +585,27 @@ def _build_cell_channels(
     if not channels or raw_right <= raw_left:
         return ()
 
-    x_values = _linspace(cell_left, cell_right, samples_per_cell)
-    raw_x_values = _linspace(raw_left, raw_right, samples_per_cell)
-    scale = signal_scale if signal_scale > 0 else 1.0
-
-    return tuple(
-        AssemblyTraceChannelSegment(
-            base=channel.base,
-            color=channel.color,
-            x_values=x_values,
-            normalized_signal=tuple(
-                _clamp_unit(_interpolate_signal(channel.signal, raw_x) / scale)
-                for raw_x in raw_x_values
-            ),
+    channel_segments: list[AssemblyTraceChannelSegment] = []
+    for channel in channels:
+        x_values, sampled_signal = resample_signal_window(
+            channel.signal,
+            raw_left=raw_left,
+            raw_right=raw_right,
+            cell_left=cell_left,
+            cell_right=cell_right,
+            sample_count=samples_per_cell,
+            signal_scale=signal_scale,
+            clamp_to_unit=True,
         )
-        for channel in channels
-    )
-
-
-def _interpolate_signal(signal: tuple[int, ...], x_value: float) -> float:
-    if not signal:
-        return 0.0
-    if x_value <= 0:
-        return float(signal[0])
-
-    max_index = len(signal) - 1
-    if x_value >= max_index:
-        return float(signal[max_index])
-
-    left_index = int(math.floor(x_value))
-    right_index = int(math.ceil(x_value))
-    if left_index == right_index:
-        return float(signal[left_index])
-
-    right_weight = x_value - float(left_index)
-    left_weight = 1.0 - right_weight
-    return (
-        float(signal[left_index]) * left_weight
-        + float(signal[right_index]) * right_weight
-    )
-
-
-def _linspace(start: float, end: float, count: int) -> tuple[float, ...]:
-    if count <= 1:
-        return ((start + end) / 2.0,)
-    step = (end - start) / float(count - 1)
-    return tuple(start + (step * index) for index in range(count))
-
-
-def _clamp_unit(value: float) -> float:
-    return max(0.0, min(value, 1.0))
+        channel_segments.append(
+            AssemblyTraceChannelSegment(
+                base=channel.base,
+                color=channel.color,
+                x_values=x_values,
+                normalized_signal=sampled_signal,
+            )
+        )
+    return tuple(channel_segments)
 
 
 def _pairwise_trace_columns(

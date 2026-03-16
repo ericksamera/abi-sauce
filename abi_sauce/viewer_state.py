@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final, TypeAlias
 
-from abi_sauce.services.batch import BatchSignature
+from abi_sauce.services.batch_parse import BatchSignature
 from abi_sauce.trim_state import BatchTrimState, TrimScope
 from abi_sauce.trimming import TrimConfig
 

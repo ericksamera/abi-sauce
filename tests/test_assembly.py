@@ -68,7 +68,7 @@ def test_assemble_trimmed_pair_auto_picks_reverse_complement_for_right_read() ->
     )
 
     assert result.accepted is True
-    assert result.chosen_right_orientation == "reverse-complement"
+    assert result.chosen_right_orientation == "reverse_complement"
     assert result.overlap_length == 5
     assert result.percent_identity == 100.0
     assert result.consensus_sequence == "CCCCAAAAC"
@@ -284,7 +284,7 @@ def test_assemble_trimmed_multi_builds_seeded_consensus_and_alignment_grid() -> 
         "AACCGG-TTA",
     )
     assert result.members[0].is_seed is True
-    assert result.members[2].chosen_orientation == "reverse-complement"
+    assert result.members[2].chosen_orientation == "reverse_complement"
     assert len(result.columns) == 10
     assert result.columns[6].consensus_base == "A"
     assert result.columns[6].resolution == "single_read"

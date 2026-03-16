@@ -6,7 +6,7 @@ from typing import TypeAlias
 
 import streamlit as st
 
-from abi_sauce.assembly import AssemblyStrand, MultiAssemblyResult
+from abi_sauce.assembly_types import AssemblyStrand, MultiAssemblyResult
 from abi_sauce.assembly_state import AssemblyDefinition
 from abi_sauce.assembly_trace import (
     AssemblyTraceRowSource,
@@ -16,19 +16,25 @@ from abi_sauce.assembly_trace import (
     build_pairwise_assembly_trace_view,
 )
 from abi_sauce.models import SequenceRecord, TraceData
-from abi_sauce.services.assembly import ComputedAssembly, compute_saved_assemblies
-from abi_sauce.services.batch import (
+from abi_sauce.services.assembly_compute import (
+    ComputedAssembly,
+    compute_saved_assemblies,
+)
+from abi_sauce.services.batch_parse import (
     BatchSignature,
     ParsedBatch,
+)
+from abi_sauce.services.batch_trim import (
     PreparedBatch,
-    apply_trim_configs,
+    build_prepared_batch,
+    resolve_effective_trim_configs,
 )
 from abi_sauce.trim_state import (
     BatchTrimState,
     ResolvedBatchTrimInputs,
     resolve_batch_trim_inputs,
 )
-from abi_sauce.trimming import TrimConfig, TrimResult
+from abi_sauce.trimming import TrimConfig, TrimResult, trim_sequence_record
 
 ParsedBatchCacheKey: TypeAlias = tuple[
     BatchSignature,
@@ -52,10 +58,12 @@ ComputedAssemblyCacheKey: TypeAlias = tuple[
     str | None,
 ]
 AssemblyTraceRowSourceCacheKey: TypeAlias = tuple[str, str, AssemblyStrand]
+TrimmedRecordCacheKey: TypeAlias = tuple[str, TrimConfig]
 
-_PREPARED_BATCH_CACHE_VERSION = 2
+_PREPARED_BATCH_CACHE_VERSION = 3
 _COMPUTED_ASSEMBLIES_CACHE_VERSION = 2
 _ASSEMBLY_TRACE_ROW_SOURCE_CACHE_VERSION = 1
+_TRIM_SEQUENCE_RECORD_CACHE_VERSION = 1
 _ASSEMBLY_TRACE_VIEW_CACHE_VERSION = 2
 
 
@@ -155,6 +163,45 @@ def build_assembly_trace_row_source_cache_key(
     )
 
 
+def build_trimmed_record_cache_key(
+    parsed_record: SequenceRecord,
+    trim_config: TrimConfig,
+) -> TrimmedRecordCacheKey:
+    """Return a stable cache key for one record/config trim computation."""
+    return (
+        _sequence_record_cache_digest(parsed_record),
+        trim_config,
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=4096)
+def _trim_sequence_record_cached(
+    *,
+    cache_version: int,
+    trimmed_record_key: TrimmedRecordCacheKey,
+    _parsed_record: SequenceRecord,
+    _trim_config: TrimConfig,
+) -> TrimResult:
+    """Return one cached trim result for a single record/config pair."""
+    return trim_sequence_record(_parsed_record, _trim_config)
+
+
+def trim_sequence_record_for_cache(
+    parsed_record: SequenceRecord,
+    trim_config: TrimConfig,
+) -> TrimResult:
+    """Return one cached trim result for a single record/config pair."""
+    return _trim_sequence_record_cached(
+        cache_version=_TRIM_SEQUENCE_RECORD_CACHE_VERSION,
+        trimmed_record_key=build_trimmed_record_cache_key(
+            parsed_record,
+            trim_config,
+        ),
+        _parsed_record=parsed_record,
+        _trim_config=trim_config,
+    )
+
+
 @st.cache_data(show_spinner=False, max_entries=256)
 def _build_assembly_trace_row_source_cached(
     *,
@@ -201,10 +248,21 @@ def _prepare_batch_cached(
     _resolved_trim_inputs: ResolvedBatchTrimInputs,
 ) -> PreparedBatch:
     """Return one prepared batch for a parsed batch plus resolved trim inputs."""
-    return apply_trim_configs(
+    effective_trim_configs_by_name = resolve_effective_trim_configs(
         _parsed_batch,
         default_trim_config=_resolved_trim_inputs.default_trim_config,
         trim_configs_by_name=_resolved_trim_inputs.trim_configs_by_name,
+    )
+    trim_results = {
+        source_filename: trim_sequence_record_for_cache(
+            _parsed_batch.parsed_records[source_filename],
+            effective_trim_configs_by_name[source_filename],
+        )
+        for source_filename in _parsed_batch.parsed_records
+    }
+    return build_prepared_batch(
+        _parsed_batch,
+        trim_results=trim_results,
     )
 
 
@@ -363,6 +421,7 @@ def _sequence_record_cache_digest(record: SequenceRecord) -> str:
             else tuple(int(value) for value in record.qualities)
         ),
         _trace_data_cache_snapshot(record.trace_data),
+        _annotations_cache_snapshot(record.annotations),
     )
     return _stable_repr_digest(snapshot)
 
@@ -399,6 +458,20 @@ def _trace_data_cache_snapshot(
             )
             for channel_name, signal in sorted(trace_data.channels.items())
         ),
+    )
+
+
+def _annotations_cache_snapshot(
+    annotations: dict[str, object],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted(
+            (
+                str(key),
+                _stable_repr_digest(value),
+            )
+            for key, value in annotations.items()
+        )
     )
 
 

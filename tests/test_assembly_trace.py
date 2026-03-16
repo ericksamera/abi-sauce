@@ -95,7 +95,7 @@ def test_build_pairwise_assembly_trace_view_builds_row_bands_and_alignment_cells
     assert right_row.y_bottom == 0.0
     assert right_row.y_top == 3.0
     assert left_row.strand == "forward"
-    assert right_row.strand == "reverse-complement"
+    assert right_row.strand == "reverse_complement"
     assert left_row.aligned_sequence == result.aligned_left
     assert right_row.aligned_sequence == result.aligned_right
     assert len(left_row.cells) == len(result.columns)
@@ -315,7 +315,7 @@ def test_build_multi_assembly_trace_view_builds_one_row_per_included_member() ->
     assert tuple(row.strand for row in trace_view.rows) == (
         "forward",
         "forward",
-        "reverse-complement",
+        "reverse_complement",
     )
     assert tuple(row.aligned_sequence for row in trace_view.rows) == (
         "AACCGG-TTA",

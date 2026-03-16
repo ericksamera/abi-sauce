@@ -93,7 +93,7 @@ def test_align_trimmed_read_to_reference_auto_picks_reverse_complement() -> None
         strand_policy="auto",
     )
 
-    assert alignment_result.strand == "reverse-complement"
+    assert alignment_result.strand == "reverse_complement"
     assert alignment_result.percent_identity == 100.0
     assert alignment_result.aligned_reference == "AAAAC"
     assert alignment_result.aligned_query == "AAAAC"

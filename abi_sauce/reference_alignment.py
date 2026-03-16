@@ -1,56 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
-
 from Bio import Align
 
-from abi_sauce.models import SequenceOrientation, SequenceRecord
-from abi_sauce.orientation import (
-    materialize_oriented_record,
-    reverse_complement_sequence,
+from abi_sauce.alignment_policy import (
+    alignment_strands_for_policy,
+    build_semiglobal_aligner,
+    select_best_oriented_alignment,
 )
+from abi_sauce.models import SequenceRecord
+from abi_sauce.oriented_reads import prepare_trimmed_read
+from abi_sauce.reference_alignment_presenters import (
+    alignment_events_to_rows,
+    format_alignment_block,
+)
+from abi_sauce.reference_alignment_types import (
+    AlignmentEvent,
+    AlignmentResult,
+    ChosenStrand,
+    StrandPolicy,
+)
+from abi_sauce.trace_coordinates import trace_position_for_oriented_query_index
 from abi_sauce.trimming import TrimResult
 
-StrandPolicy = Literal["auto", "forward", "reverse-complement"]
-ChosenStrand = Literal["forward", "reverse-complement"]
-
 _ALLOWED_REFERENCE_CHARACTERS = frozenset("ACGTURYKMSWBDHVN")
-
-
-@dataclass(frozen=True, slots=True)
-class AlignmentEvent:
-    ref_pos: int | None
-    query_pos: int | None
-    event_type: str
-    ref_base: str
-    query_base: str
-    qscore: int | None
-    flank_q_left: int | None
-    flank_q_right: int | None
-    trace_x: int | None
-    context_ref: str
-    context_query: str
-
-
-@dataclass(frozen=True, slots=True)
-class AlignmentResult:
-    sample_name: str
-    reference_name: str
-    strand: ChosenStrand
-    score: float
-    reference_start: int | None
-    reference_end: int | None
-    query_start: int | None
-    query_end: int | None
-    percent_identity: float
-    mismatch_count: int
-    insertion_count: int
-    deletion_count: int
-    aligned_reference: str
-    match_line: str
-    aligned_query: str
-    events: tuple[AlignmentEvent, ...]
 
 
 def normalize_reference(reference_text: str) -> tuple[str, str]:
@@ -84,25 +56,12 @@ def build_aligner(
     extend_internal_gap_score: float = -1.0,
 ) -> Align.PairwiseAligner:
     """Build a pairwise aligner with internal penalties and free terminal overhangs."""
-    aligner = Align.PairwiseAligner(mode="global")
-    aligner.match_score = match_score
-    aligner.mismatch_score = mismatch_score
-
-    aligner.open_internal_insertion_score = open_internal_gap_score
-    aligner.extend_internal_insertion_score = extend_internal_gap_score
-    aligner.open_internal_deletion_score = open_internal_gap_score
-    aligner.extend_internal_deletion_score = extend_internal_gap_score
-
-    aligner.open_left_insertion_score = 0.0
-    aligner.extend_left_insertion_score = 0.0
-    aligner.open_right_insertion_score = 0.0
-    aligner.extend_right_insertion_score = 0.0
-    aligner.open_left_deletion_score = 0.0
-    aligner.extend_left_deletion_score = 0.0
-    aligner.open_right_deletion_score = 0.0
-    aligner.extend_right_deletion_score = 0.0
-
-    return aligner
+    return build_semiglobal_aligner(
+        match_score=match_score,
+        mismatch_score=mismatch_score,
+        open_internal_gap_score=open_internal_gap_score,
+        extend_internal_gap_score=extend_internal_gap_score,
+    )
 
 
 def align_trimmed_read_to_reference(
@@ -116,63 +75,29 @@ def align_trimmed_read_to_reference(
     context_window: int = 5,
 ) -> AlignmentResult:
     """Align one trimmed read against a reference and return summary + event details."""
-    if strand_policy not in {"auto", "forward", "reverse-complement"}:
-        raise ValueError(f"Unsupported strand policy: {strand_policy}")
-
     normalized_reference_name, reference_sequence = normalize_reference(reference_text)
     resolved_reference_name = (
         normalized_reference_name if reference_name is None else reference_name
     )
 
-    display_trimmed_record = materialize_oriented_record(trim_result.record)
-    trimmed_sequence = display_trimmed_record.sequence.upper()
-    if not trimmed_sequence:
+    prepared_query_read = prepare_trimmed_read(
+        raw_record=raw_record,
+        trim_result=trim_result,
+    )
+    if not prepared_query_read.display_sequence:
         raise ValueError("Trimmed query sequence is empty.")
 
     resolved_aligner = build_aligner() if aligner is None else aligner
+    allowed_strands = alignment_strands_for_policy(strand_policy)
+    best_query_alignment = select_best_oriented_alignment(
+        target_sequence=reference_sequence,
+        display_query_sequence=prepared_query_read.display_sequence,
+        display_query_qualities=prepared_query_read.display_qualities,
+        aligner=resolved_aligner,
+        allowed_strands=allowed_strands,
+    )
 
-    candidate_queries: list[tuple[ChosenStrand, str, list[int] | None]] = []
-    if strand_policy in {"auto", "forward"}:
-        candidate_queries.append(
-            (
-                "forward",
-                trimmed_sequence,
-                _candidate_query_qualities(
-                    display_trimmed_record.qualities,
-                    strand="forward",
-                ),
-            )
-        )
-    if strand_policy in {"auto", "reverse-complement"}:
-        candidate_queries.append(
-            (
-                "reverse-complement",
-                reverse_complement_sequence(trimmed_sequence),
-                _candidate_query_qualities(
-                    display_trimmed_record.qualities,
-                    strand="reverse-complement",
-                ),
-            )
-        )
-
-    best_alignment = None
-    best_query_sequence = ""
-    best_query_qualities = None
-    chosen_strand: ChosenStrand = "forward"
-    best_score = float("-inf")
-
-    for strand, oriented_query_sequence, oriented_query_qualities in candidate_queries:
-        alignment = resolved_aligner.align(reference_sequence, oriented_query_sequence)[
-            0
-        ]
-        if alignment.score > best_score:
-            best_alignment = alignment
-            best_query_sequence = oriented_query_sequence
-            best_query_qualities = oriented_query_qualities
-            chosen_strand = strand
-            best_score = float(alignment.score)
-
-    if best_alignment is None:
+    if best_query_alignment is None:
         raise ValueError("No alignment could be generated.")
 
     (
@@ -189,13 +114,13 @@ def align_trimmed_read_to_reference(
         query_start,
         query_end,
     ) = _extract_alignment_details(
-        alignment=best_alignment,
+        alignment=best_query_alignment.alignment,
         raw_record=raw_record,
         trim_result=trim_result,
         reference_sequence=reference_sequence,
-        oriented_query_sequence=best_query_sequence,
-        oriented_query_qualities=best_query_qualities,
-        strand=chosen_strand,
+        oriented_query_sequence=best_query_alignment.sequence,
+        oriented_query_qualities=best_query_alignment.qualities,
+        strand=best_query_alignment.strand,
         context_window=context_window,
     )
 
@@ -203,10 +128,10 @@ def align_trimmed_read_to_reference(
     percent_identity = (matches / aligned_columns * 100.0) if aligned_columns else 0.0
 
     return AlignmentResult(
-        sample_name=trim_result.record.name or trim_result.record.record_id,
+        sample_name=prepared_query_read.display_name,
         reference_name=resolved_reference_name,
-        strand=chosen_strand,
-        score=best_score,
+        strand=best_query_alignment.strand,
+        score=best_query_alignment.score,
         reference_start=reference_start,
         reference_end=reference_end,
         query_start=query_start,
@@ -220,50 +145,6 @@ def align_trimmed_read_to_reference(
         aligned_query=aligned_query,
         events=tuple(events),
     )
-
-
-def alignment_events_to_rows(
-    result: AlignmentResult,
-    *,
-    include_matches: bool = False,
-) -> list[dict[str, object]]:
-    """Convert alignment events into Streamlit-table-friendly rows."""
-    rows: list[dict[str, object]] = []
-    for event in result.events:
-        if not include_matches and event.event_type == "match":
-            continue
-        rows.append(
-            {
-                "ref_pos": event.ref_pos,
-                "query_pos": event.query_pos,
-                "type": event.event_type,
-                "ref_base": event.ref_base,
-                "query_base": event.query_base,
-                "qscore": event.qscore,
-                "flank_q_left": event.flank_q_left,
-                "flank_q_right": event.flank_q_right,
-                "trace_x": event.trace_x,
-                "context_ref": event.context_ref,
-                "context_query": event.context_query,
-            }
-        )
-    return rows
-
-
-def format_alignment_block(
-    result: AlignmentResult,
-    *,
-    line_width: int = 80,
-) -> str:
-    """Render a three-line gapped alignment block for display."""
-    lines: list[str] = []
-    for start in range(0, len(result.aligned_reference), line_width):
-        end = start + line_width
-        lines.append(result.aligned_reference[start:end])
-        lines.append(result.match_line[start:end])
-        lines.append(result.aligned_query[start:end])
-        lines.append("")
-    return "\n".join(lines).rstrip()
 
 
 def _extract_alignment_details(
@@ -361,7 +242,7 @@ def _extract_alignment_details(
             query_indices,
             column_index=column_index,
         )
-        trace_x = _trace_position_for_query_index(
+        trace_x = trace_position_for_oriented_query_index(
             raw_record=raw_record,
             trim_result=trim_result,
             oriented_query_index=(
@@ -419,107 +300,6 @@ def _extract_alignment_details(
         query_start,
         query_end,
     )
-
-
-def _candidate_query_qualities(
-    display_qualities: list[int] | None,
-    *,
-    strand: ChosenStrand,
-) -> list[int] | None:
-    if display_qualities is None:
-        return None
-    if strand == "forward":
-        return [int(value) for value in display_qualities]
-    return [int(value) for value in reversed(display_qualities)]
-
-
-def _trace_position_for_query_index(
-    *,
-    raw_record: SequenceRecord,
-    trim_result: TrimResult,
-    oriented_query_index: int | None,
-    strand: ChosenStrand,
-) -> int | None:
-    if oriented_query_index is None:
-        return None
-
-    trace_data = raw_record.trace_data
-    if trace_data is None:
-        return None
-
-    raw_start = trim_result.bases_removed_left
-    trimmed_length = trim_result.trimmed_length
-    if trimmed_length <= 0:
-        return None
-
-    display_query_index = _display_query_index_for_aligned_query_index(
-        oriented_query_index,
-        trimmed_length=trimmed_length,
-        strand=strand,
-    )
-    raw_trimmed_index = _raw_trimmed_index_for_display_query_index(
-        display_query_index,
-        trimmed_length=trimmed_length,
-        display_orientation=raw_record.orientation,
-    )
-    raw_base_index = raw_start + raw_trimmed_index
-
-    if raw_base_index < 0 or raw_base_index >= len(trace_data.base_positions):
-        return None
-
-    raw_trace_position = int(trace_data.base_positions[raw_base_index])
-    trace_length = _sanitized_trace_length(trace_data)
-    if trace_length <= 0:
-        return raw_trace_position
-    if raw_trace_position < 0 or raw_trace_position >= trace_length:
-        return None
-    return _display_trace_position(
-        raw_trace_position,
-        trace_length=trace_length,
-        display_orientation=raw_record.orientation,
-    )
-
-
-def _display_query_index_for_aligned_query_index(
-    aligned_query_index: int,
-    *,
-    trimmed_length: int,
-    strand: ChosenStrand,
-) -> int:
-    if strand == "forward":
-        return aligned_query_index
-    return trimmed_length - 1 - aligned_query_index
-
-
-def _raw_trimmed_index_for_display_query_index(
-    display_query_index: int,
-    *,
-    trimmed_length: int,
-    display_orientation: SequenceOrientation,
-) -> int:
-    if display_orientation == "forward":
-        return display_query_index
-    return trimmed_length - 1 - display_query_index
-
-
-def _sanitized_trace_length(trace_data) -> int:
-    channel_lengths = [
-        len(signal) for signal in trace_data.channels.values() if len(signal) > 0
-    ]
-    if not channel_lengths:
-        return 0
-    return min(channel_lengths)
-
-
-def _display_trace_position(
-    raw_trace_position: int,
-    *,
-    trace_length: int,
-    display_orientation: SequenceOrientation,
-) -> int:
-    if display_orientation == "forward":
-        return raw_trace_position
-    return int(float(trace_length - 1) - float(raw_trace_position))
 
 
 def _flanking_qualities_for_column(
@@ -586,3 +366,16 @@ def _context_window(sequence: str, index: int | None, *, window: int) -> str:
     left = max(index - window, 0)
     right = min(index + window + 1, len(sequence))
     return sequence[left:right]
+
+
+__all__ = [
+    "StrandPolicy",
+    "ChosenStrand",
+    "AlignmentEvent",
+    "AlignmentResult",
+    "normalize_reference",
+    "build_aligner",
+    "align_trimmed_read_to_reference",
+    "alignment_events_to_rows",
+    "format_alignment_block",
+]

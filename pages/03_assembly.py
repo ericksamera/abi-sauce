@@ -5,13 +5,15 @@ from urllib.parse import quote
 
 import streamlit as st
 
-from abi_sauce.assembly import (
+from abi_sauce.assembly_exports import format_assembly_alignment_fasta
+from abi_sauce.assembly_presenters import (
+    assembly_conflicts_to_rows,
+    format_assembly_block,
+)
+from abi_sauce.assembly_types import (
     AssemblyComputationResult,
     AssemblyConfig,
     MultiAssemblyResult,
-    assembly_conflicts_to_rows,
-    format_assembly_alignment_fasta,
-    format_assembly_block,
 )
 from abi_sauce.assembly_state import (
     AssemblyDefinition,
@@ -30,10 +32,8 @@ from abi_sauce.chromatogram_figure import build_chromatogram_figure
 from abi_sauce.export import to_fasta
 from abi_sauce.exceptions import ExportError
 from abi_sauce.models import SequenceRecord
-from abi_sauce.services.assembly import (
-    ComputedAssembly,
-    prepare_assembly_download,
-)
+from abi_sauce.services.assembly_compute import ComputedAssembly
+from abi_sauce.services.assembly_export import prepare_assembly_download
 from abi_sauce.streamlit_cache import (
     build_selected_assembly_trace_view,
     compute_saved_assemblies_for_definitions,
@@ -206,7 +206,7 @@ def _assembly_summary_rows(
                 "right_orientation": (
                     None
                     if result is None or isinstance(result, MultiAssemblyResult)
-                    else result.chosen_right_orientation
+                    else result.chosen_right_orientation.replace("_", "-")
                 ),
                 "overlap_length": (
                     None
@@ -861,7 +861,7 @@ if isinstance(selected_result, MultiAssemblyResult):
             "has_trace_data": member.has_trace_data,
             "is_seed": member.is_seed,
             "included": member.included,
-            "chosen_orientation": member.chosen_orientation,
+            "chosen_orientation": member.chosen_orientation.replace("_", "-"),
             "overlap_length": member.overlap_length,
             "percent_identity": member.percent_identity,
             "inclusion_reason": member.inclusion_reason,
@@ -1060,7 +1060,10 @@ if debug:
 
     metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
     with metric_col_1:
-        st.metric("Right orientation", selected_result.chosen_right_orientation)
+        st.metric(
+            "Right orientation",
+            selected_result.chosen_right_orientation.replace("_", "-"),
+        )
     with metric_col_2:
         st.metric(
             "Score",

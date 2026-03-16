@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import math
 from typing import Final
 
 from abi_sauce.models import SequenceOrientation, SequenceRecord, TraceData
+from abi_sauce.signal_sampling import resample_signal_window
+from abi_sauce.trace_coordinates import display_trim_start
 from abi_sauce.orientation import complement_base
 from abi_sauce.trimming import TrimResult
 
@@ -547,60 +548,25 @@ def _build_column_channels(
     if not channels or raw_right <= raw_left:
         return ()
 
-    x_values = _linspace(cell_left, cell_right, samples_per_base)
-    raw_x_values = _linspace(raw_left, raw_right, samples_per_base)
-    return tuple(
-        ChromatogramColumnChannel(
-            base=channel.base,
-            color=channel.color,
-            x_values=x_values,
-            signal=tuple(
-                _interpolate_signal(channel.signal, raw_x_value)
-                for raw_x_value in raw_x_values
-            ),
+    column_channels: list[ChromatogramColumnChannel] = []
+    for channel in channels:
+        x_values, sampled_signal = resample_signal_window(
+            channel.signal,
+            raw_left=raw_left,
+            raw_right=raw_right,
+            cell_left=cell_left,
+            cell_right=cell_right,
+            sample_count=samples_per_base,
         )
-        for channel in channels
-    )
-
-
-def _interpolate_signal(signal: tuple[int, ...], x_value: float) -> float:
-    if not signal:
-        return 0.0
-    if x_value <= 0:
-        return float(signal[0])
-
-    max_index = len(signal) - 1
-    if x_value >= max_index:
-        return float(signal[max_index])
-
-    left_index = int(math.floor(x_value))
-    right_index = int(math.ceil(x_value))
-    if left_index == right_index:
-        return float(signal[left_index])
-
-    right_weight = x_value - float(left_index)
-    left_weight = 1.0 - right_weight
-    return (
-        float(signal[left_index]) * left_weight
-        + float(signal[right_index]) * right_weight
-    )
-
-
-def _linspace(start: float, end: float, count: int) -> tuple[float, ...]:
-    if count <= 1:
-        return ((_midpoint(start, end)),)
-    step = (end - start) / float(count - 1)
-    return tuple(start + (step * index) for index in range(count))
-
-
-def _display_trim_start(
-    trim_result: TrimResult,
-    *,
-    display_orientation: SequenceOrientation,
-) -> int:
-    if display_orientation == "forward":
-        return trim_result.bases_removed_left
-    return trim_result.bases_removed_right
+        column_channels.append(
+            ChromatogramColumnChannel(
+                base=channel.base,
+                color=channel.color,
+                x_values=x_values,
+                signal=sampled_signal,
+            )
+        )
+    return tuple(column_channels)
 
 
 def _is_base_index_retained(
@@ -614,12 +580,12 @@ def _is_base_index_retained(
     if trim_result.trimmed_length <= 0:
         return False
 
-    display_trim_start = _display_trim_start(
+    trimmed_display_start = display_trim_start(
         trim_result,
         display_orientation=display_orientation,
     )
-    display_trim_end = display_trim_start + trim_result.trimmed_length
-    return display_trim_start <= base_index < display_trim_end
+    display_trim_end = trimmed_display_start + trim_result.trimmed_length
+    return trimmed_display_start <= base_index < display_trim_end
 
 
 def _resolve_column_trim_boundaries(
@@ -632,19 +598,25 @@ def _resolve_column_trim_boundaries(
     if trim_result is None or base_count <= 0:
         return ChromatogramTrimBoundaries()
 
-    display_trim_start = min(
+    trimmed_display_start = min(
         max(
-            _display_trim_start(trim_result, display_orientation=display_orientation), 0
+            display_trim_start(
+                trim_result,
+                display_orientation=display_orientation,
+            ),
+            0,
         ),
         base_count,
     )
     display_trim_end = min(
-        max(display_trim_start + trim_result.trimmed_length, display_trim_start),
+        max(trimmed_display_start + trim_result.trimmed_length, trimmed_display_start),
         base_count,
     )
     return ChromatogramTrimBoundaries(
         left=(
-            None if display_trim_start <= 0 else float(display_trim_start) * cell_width
+            None
+            if trimmed_display_start <= 0
+            else float(trimmed_display_start) * cell_width
         ),
         right=(
             None

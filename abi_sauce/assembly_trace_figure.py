@@ -5,7 +5,7 @@ from typing import Final
 
 import plotly.graph_objects as go
 
-from abi_sauce.assembly import ConflictResolution
+from abi_sauce.assembly_types import ConflictResolution
 from abi_sauce.assembly_trace import (
     AssemblyTraceCell,
     AssemblyTraceChannelSegment,
