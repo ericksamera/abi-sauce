@@ -17,6 +17,7 @@ from abi_sauce.reference_alignment import build_aligner, normalize_reference
 from abi_sauce.reference_alignment_types import (
     ChosenStrand,
     ReferenceConsensusResolution,
+    ReferenceMultiAnchorKind,
     ReferenceMultiAlignmentColumn,
     ReferenceMultiAlignmentMember,
     ReferenceMultiAlignmentMemberCell,
@@ -607,7 +608,7 @@ def _reference_multi_bucket_column_representative(
 def _build_reference_multi_column(
     *,
     column_index: int,
-    anchor_kind: str,
+    anchor_kind: ReferenceMultiAnchorKind,
     anchor_index: int,
     ref_index: int | None,
     ref_base: str,
