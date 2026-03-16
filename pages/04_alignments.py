@@ -23,6 +23,16 @@ from abi_sauce.assembly_trace_figure import build_assembly_trace_figure
 from abi_sauce.assembly_types import AssemblyConfig, AssemblyResult
 from abi_sauce.export import to_fasta
 from abi_sauce.reference_alignment_exports import format_reference_alignment_fasta
+from abi_sauce.reference_alignment_multi_exports import (
+    consensus_record_from_reference_multi_result,
+    format_reference_multi_alignment_fasta,
+)
+from abi_sauce.reference_alignment_multi_presenters import (
+    format_reference_multi_alignment_block,
+)
+from abi_sauce.reference_alignment_multi_trace_figure import (
+    build_reference_multi_alignment_trace_figure,
+)
 from abi_sauce.reference_alignment_presenters import format_alignment_block
 from abi_sauce.reference_alignment_trace_figure import (
     build_reference_alignment_trace_figure,
@@ -407,6 +417,115 @@ def _render_reference_single_result(
             )
 
 
+def _render_reference_multi_result(
+    *,
+    computed_alignment: ComputedAlignment,
+    theme_type: str,
+) -> None:
+    reference_multi_alignment = computed_alignment.reference_multi_alignment
+    if reference_multi_alignment is None:
+        st.error(
+            computed_alignment.status_reason
+            or "Shared-reference alignment result is unavailable."
+        )
+        return
+
+    result = reference_multi_alignment.result
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
+    with metric_col_1:
+        st.metric("Included reads", result.included_member_count)
+    with metric_col_2:
+        st.metric("Excluded reads", result.excluded_member_count)
+    with metric_col_3:
+        st.metric("Reference length", len(result.reference_sequence))
+    with metric_col_4:
+        st.metric("Consensus length", len(result.consensus_sequence))
+    with metric_col_5:
+        st.metric("Ambiguous columns", result.ambiguous_column_count)
+
+    trace_view = reference_multi_alignment.trace_view
+    if trace_view is not None:
+        st.subheader("Aligned electropherogram view")
+        aligned_trace_figure = build_reference_multi_alignment_trace_figure(
+            trace_view,
+            theme_type=theme_type,
+            selected_column_index=None,
+        )
+        aligned_trace_figure.update_xaxes(
+            range=_centered_alignment_x_range(
+                alignment_length=trace_view.alignment_length,
+                cell_width=trace_view.cell_width,
+                center_column_index=None,
+            )
+        )
+        aligned_trace_figure.update_layout(
+            height=max(
+                _ALIGNED_TRACE_MIN_HEIGHT_PX,
+                _ALIGNED_TRACE_BASE_HEIGHT_PX
+                + (len(trace_view.rows) * _ALIGNED_TRACE_ROW_HEIGHT_PX),
+            ),
+            margin={"l": 24, "r": 24, "t": 24, "b": 56},
+        )
+        st.plotly_chart(
+            aligned_trace_figure,
+            width="stretch",
+            config={"scrollZoom": False},
+        )
+    else:
+        st.warning(
+            "Aligned electropherogram view is unavailable for this shared-reference alignment."
+        )
+
+    member_rows = list(reference_multi_alignment.member_rows)
+    if member_rows:
+        st.subheader("Read placement summary")
+        st.dataframe(member_rows, hide_index=True, width="stretch")
+
+    column_rows = list(reference_multi_alignment.column_rows)
+    st.subheader("Support / variant summary")
+    if column_rows:
+        st.dataframe(column_rows, hide_index=True, width="stretch")
+    else:
+        st.success("No non-reference support columns remain after the current filters.")
+
+    if result.consensus_sequence:
+        consensus_record = consensus_record_from_reference_multi_result(
+            result,
+            name=computed_alignment.definition.name,
+        )
+        consensus_fasta = to_fasta(consensus_record, line_width=None)
+        alignment_fasta = format_reference_multi_alignment_fasta(
+            result,
+            consensus_name=consensus_record.name,
+        )
+        st.subheader("Consensus FASTA")
+        st.code(consensus_fasta, wrap_lines=True)
+        consensus_col, alignment_col = st.columns(2)
+        filename_stem = _safe_filename_stem(consensus_record.name)
+        with consensus_col:
+            st.download_button(
+                "Download consensus FASTA",
+                data=consensus_fasta,
+                file_name=f"{filename_stem}.fasta",
+                mime="text/plain",
+            )
+        with alignment_col:
+            st.download_button(
+                "Download alignment FASTA",
+                data=alignment_fasta,
+                file_name=f"{filename_stem}.msa.fasta",
+                mime="text/plain",
+            )
+
+        debug = False
+        if debug:
+            st.subheader("Gapped alignment")
+            st.code(
+                format_reference_multi_alignment_block(result),
+                wrap_lines=False,
+            )
+
+
 @st.dialog(
     "Create alignment",
     width="large",
@@ -479,7 +598,7 @@ def _create_alignment_dialog(
             step=1,
             value=25,
             key=_NEW_MIN_OVERLAP_WIDGET_KEY,
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
     min_percent_identity = float(
@@ -490,7 +609,7 @@ def _create_alignment_dialog(
             step=1.0,
             value=70.0,
             key=_NEW_MIN_IDENTITY_WIDGET_KEY,
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
     quality_margin = int(
@@ -500,7 +619,7 @@ def _create_alignment_dialog(
             step=1,
             value=3,
             key=_NEW_QUALITY_MARGIN_WIDGET_KEY,
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
 
@@ -527,9 +646,10 @@ def _create_alignment_dialog(
     elif _reference_required(engine_kind) and not reference_valid:
         st.warning("Reference-guided modes require reference text.")
     elif engine_kind == "reference_multi":
-        st.info(
-            "This option is scaffolded into the saved-workspace flow, but the "
-            "actual shared-reference multi-read compute path is still pending."
+        st.caption(
+            "Shared-reference mode independently places each selected read onto "
+            "the reference coordinate system, then derives support and consensus "
+            "across the shared grid."
         )
 
     save_col, cancel_col = st.columns(2)
@@ -645,7 +765,7 @@ def _edit_alignment_dialog(
             step=1,
             value=definition.assembly_config.min_overlap_length,
             key=f"{_EDIT_MIN_OVERLAP_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
     min_percent_identity = float(
@@ -656,7 +776,7 @@ def _edit_alignment_dialog(
             step=1.0,
             value=definition.assembly_config.min_percent_identity,
             key=f"{_EDIT_MIN_IDENTITY_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
     quality_margin = int(
@@ -666,7 +786,7 @@ def _edit_alignment_dialog(
             step=1,
             value=definition.assembly_config.quality_margin,
             key=f"{_EDIT_QUALITY_MARGIN_WIDGET_KEY_PREFIX}.{definition.alignment_id}",
-            disabled=engine_kind != "pairwise",
+            disabled=engine_kind == "reference_single",
         )
     )
 
@@ -693,9 +813,10 @@ def _edit_alignment_dialog(
     elif _reference_required(engine_kind) and not reference_valid:
         st.warning("Reference-guided modes require reference text.")
     elif engine_kind == "reference_multi":
-        st.info(
-            "This option is scaffolded into the saved-workspace flow, but the "
-            "actual shared-reference multi-read compute path is still pending."
+        st.caption(
+            "Shared-reference mode independently places each selected read onto "
+            "the reference coordinate system, then derives support and consensus "
+            "across the shared grid."
         )
 
     save_col, cancel_col = st.columns(2)
@@ -918,8 +1039,10 @@ elif selected_definition.engine_kind == "reference_single":
         computed_alignment=selected_computed_alignment,
         theme_type=theme_type,
     )
-else:
-    st.caption(
-        "This saved definition already participates in the workspace lifecycle. "
-        "The remaining implementation work is the shared-reference multi-read compute and renderer."
+elif selected_definition.engine_kind == "reference_multi":
+    _render_reference_multi_result(
+        computed_alignment=selected_computed_alignment,
+        theme_type=theme_type,
     )
+else:
+    st.error("Unsupported alignment engine.")

@@ -46,6 +46,8 @@ def make_prepared_batch():
         SequenceUpload(filename="left.ab1", content=b"left"),
         SequenceUpload(filename="right.ab1", content=b"right"),
         SequenceUpload(filename="trace.ab1", content=b"trace"),
+        SequenceUpload(filename="trace_2.ab1", content=b"trace_2"),
+        SequenceUpload(filename="trace_3.ab1", content=b"trace_3"),
     )
     parsed_batch = ParsedBatch(
         uploads=uploads,
@@ -64,6 +66,16 @@ def make_prepared_batch():
                 name="trace",
                 sequence="AACCGGTT",
                 qualities=[10, 20, 30, 40, 50, 40, 30, 20],
+            ),
+            "trace_2.ab1": make_record(
+                name="trace_2",
+                sequence="AACCGGTT",
+                qualities=[40] * 8,
+            ),
+            "trace_3.ab1": make_record(
+                name="trace_3",
+                sequence="AACCGGTA",
+                qualities=[35] * 8,
             ),
         },
         parse_errors={},
@@ -138,21 +150,35 @@ def test_compute_saved_alignment_rejects_missing_reference_text() -> None:
     assert "requires reference text" in computed_alignment.status_reason
 
 
-def test_compute_saved_alignment_marks_reference_multi_not_implemented() -> None:
+def test_compute_saved_alignment_returns_reference_multi_alignment_result() -> None:
     prepared_batch = make_prepared_batch()
     definition = AlignmentDefinition(
         alignment_id="alignment-reference-multi",
         name="Many vs ref",
-        source_filenames=("left.ab1", "trace.ab1"),
+        source_filenames=("trace_2.ab1", "trace_3.ab1"),
         engine_kind="reference_multi",
+        reference_name="ref",
         reference_text=">ref\nAACCGGTT\n",
+        strand_policy="forward",
+        assembly_config=AssemblyConfig(
+            min_overlap_length=6,
+            min_percent_identity=80.0,
+            quality_margin=3,
+        ),
     )
 
     computed_alignment = compute_saved_alignment(prepared_batch, definition)
 
-    assert computed_alignment.status == "not_implemented"
-    assert computed_alignment.status_reason is not None
-    assert "not been implemented yet" in computed_alignment.status_reason
+    assert computed_alignment.status == "ok"
+    assert computed_alignment.reference_multi_alignment is not None
+    assert computed_alignment.reference_multi_alignment.result.reference_name == "ref"
+    assert (
+        computed_alignment.reference_multi_alignment.result.included_member_count == 2
+    )
+    assert (
+        computed_alignment.reference_multi_alignment.result.consensus_sequence
+        == "AACCGGTT"
+    )
 
 
 def test_compute_saved_alignments_preserves_definition_order() -> None:

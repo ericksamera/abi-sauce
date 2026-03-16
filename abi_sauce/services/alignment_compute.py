@@ -13,7 +13,9 @@ from abi_sauce.services.assembly_compute import (
 from abi_sauce.services.batch_trim import PreparedBatch
 from abi_sauce.services.reference_alignment import (
     ComputedReferenceAlignment,
+    ComputedReferenceMultiAlignment,
     compute_reference_alignment,
+    compute_reference_multi_alignment,
 )
 
 AlignmentComputationStatus = Literal[
@@ -34,10 +36,15 @@ class ComputedAlignment:
     status_reason: str | None = None
     assembly: ComputedAssembly | None = None
     reference_alignment: ComputedReferenceAlignment | None = None
+    reference_multi_alignment: ComputedReferenceMultiAlignment | None = None
 
     @property
     def is_ready(self) -> bool:
-        return self.assembly is not None or self.reference_alignment is not None
+        return (
+            self.assembly is not None
+            or self.reference_alignment is not None
+            or self.reference_multi_alignment is not None
+        )
 
     @property
     def is_accepted(self) -> bool:
@@ -62,13 +69,7 @@ def compute_saved_alignment(
     if definition.engine_kind == "reference_single":
         return _compute_saved_reference_alignment(prepared_batch, definition)
     if definition.engine_kind == "reference_multi":
-        return ComputedAlignment(
-            definition=definition,
-            status="not_implemented",
-            status_reason=(
-                "reference-guided multi-read alignment has not been implemented yet"
-            ),
-        )
+        return _compute_saved_reference_multi_alignment(prepared_batch, definition)
 
     return ComputedAlignment(
         definition=definition,
@@ -139,6 +140,51 @@ def _compute_saved_reference_alignment(
         status="ok",
         status_reason=None,
         reference_alignment=computed_reference_alignment,
+    )
+
+
+def _compute_saved_reference_multi_alignment(
+    prepared_batch: PreparedBatch,
+    definition: AlignmentDefinition,
+) -> ComputedAlignment:
+    try:
+        computed_reference_multi_alignment = compute_reference_multi_alignment(
+            prepared_batch,
+            source_filenames=definition.source_filenames,
+            reference_text=definition.reference_text or "",
+            reference_name=definition.reference_name,
+            strand_policy=definition.strand_policy,
+            config=definition.assembly_config,
+        )
+    except ValueError as exc:
+        return ComputedAlignment(
+            definition=definition,
+            status="error",
+            status_reason=str(exc),
+        )
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        return ComputedAlignment(
+            definition=definition,
+            status="error",
+            status_reason=str(exc),
+        )
+
+    if computed_reference_multi_alignment.result.accepted:
+        return ComputedAlignment(
+            definition=definition,
+            status="ok",
+            status_reason=None,
+            reference_multi_alignment=computed_reference_multi_alignment,
+        )
+
+    return ComputedAlignment(
+        definition=definition,
+        status="rejected",
+        status_reason=(
+            computed_reference_multi_alignment.result.rejection_reason
+            or "reference-guided multi-read alignment rejected"
+        ),
+        reference_multi_alignment=computed_reference_multi_alignment,
     )
 
 

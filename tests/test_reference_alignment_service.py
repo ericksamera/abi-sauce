@@ -5,7 +5,11 @@ import pytest
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
 from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
 from abi_sauce.services.batch_trim import apply_trim_configs
-from abi_sauce.services.reference_alignment import compute_reference_alignment
+from abi_sauce.services.reference_alignment import (
+    compute_reference_alignment,
+    compute_reference_multi_alignment,
+)
+from abi_sauce.assembly_types import AssemblyConfig
 from abi_sauce.trimming import TrimConfig
 
 
@@ -39,7 +43,11 @@ def make_record(
 
 
 def make_prepared_batch():
-    uploads = (SequenceUpload(filename="trace.ab1", content=b"trace"),)
+    uploads = (
+        SequenceUpload(filename="trace.ab1", content=b"trace"),
+        SequenceUpload(filename="trace_2.ab1", content=b"trace_2"),
+        SequenceUpload(filename="trace_3.ab1", content=b"trace_3"),
+    )
     parsed_batch = ParsedBatch(
         uploads=uploads,
         parsed_records={
@@ -47,7 +55,17 @@ def make_prepared_batch():
                 name="trace",
                 sequence="AACCGGTT",
                 qualities=[10, 20, 30, 40, 50, 40, 30, 20],
-            )
+            ),
+            "trace_2.ab1": make_record(
+                name="trace_2",
+                sequence="AACCGGTT",
+                qualities=[40] * 8,
+            ),
+            "trace_3.ab1": make_record(
+                name="trace_3",
+                sequence="AACCGGTA",
+                qualities=[35] * 8,
+            ),
         },
         parse_errors={},
         signature=build_batch_signature(uploads),
@@ -104,3 +122,28 @@ def test_compute_reference_alignment_rejects_unknown_source_filename() -> None:
             source_filename="missing.ab1",
             reference_text=">ref\nCCGG\n",
         )
+
+
+def test_compute_reference_multi_alignment_returns_page_facing_shared_reference_state() -> (
+    None
+):
+    prepared_batch = make_prepared_batch()
+
+    computed_alignment = compute_reference_multi_alignment(
+        prepared_batch,
+        source_filenames=("trace_2.ab1", "trace_3.ab1"),
+        reference_text=">ref\nAACCGGTT\n",
+        reference_name="ref",
+        strand_policy="forward",
+        config=AssemblyConfig(min_overlap_length=6, min_percent_identity=80.0),
+    )
+
+    assert computed_alignment.result.reference_name == "ref"
+    assert computed_alignment.result.included_member_count == 2
+    assert computed_alignment.result.consensus_sequence == "AACCGGTT"
+    assert len(computed_alignment.member_rows) == 2
+    assert len(computed_alignment.column_rows) == 0
+    assert computed_alignment.trace_view is not None
+    assert computed_alignment.trace_view.alignment_length == len(
+        computed_alignment.result.columns
+    )
