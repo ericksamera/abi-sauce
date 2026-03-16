@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from abi_sauce.chromatogram import ChromatogramView, build_chromatogram_view
 from abi_sauce.reference_alignment import align_trimmed_read_to_reference
 from abi_sauce.reference_alignment_presenters import alignment_events_to_rows
+from abi_sauce.reference_alignment_trace import (
+    ReferenceAlignmentTraceView,
+    build_reference_alignment_trace_view,
+)
 from abi_sauce.reference_alignment_types import AlignmentResult, StrandPolicy
 from abi_sauce.services.batch_trim import PreparedBatch
 
@@ -17,6 +21,7 @@ class ComputedReferenceAlignment:
     alignment_result: AlignmentResult
     event_rows: tuple[dict[str, object], ...]
     chromatogram_view: ChromatogramView
+    trace_view: ReferenceAlignmentTraceView | None = None
 
 
 def compute_reference_alignment(
@@ -24,6 +29,7 @@ def compute_reference_alignment(
     *,
     source_filename: str,
     reference_text: str,
+    reference_name: str | None = None,
     strand_policy: StrandPolicy = "auto",
     include_matches: bool = False,
 ) -> ComputedReferenceAlignment:
@@ -38,6 +44,7 @@ def compute_reference_alignment(
         raw_record=raw_record,
         trim_result=trim_result,
         reference_text=reference_text,
+        reference_name=reference_name,
         strand_policy=strand_policy,
     )
     return ComputedReferenceAlignment(
@@ -50,6 +57,12 @@ def compute_reference_alignment(
             )
         ),
         chromatogram_view=build_chromatogram_view(raw_record, trim_result),
+        trace_view=build_reference_alignment_trace_view(
+            result=alignment_result,
+            source_filename=source_filename,
+            raw_record=raw_record,
+            trim_result=trim_result,
+        ),
     )
 
 

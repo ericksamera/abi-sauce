@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from abi_sauce.assembly import (
-    AssemblyConfig,
-    assemble_trimmed_multi,
-    assemble_trimmed_pair,
-)
+from abi_sauce.assembly_multi import assemble_trimmed_multi
+from abi_sauce.assembly_pairwise import assemble_trimmed_pair
+from abi_sauce.assembly_types import AssemblyConfig
 from abi_sauce.assembly_trace import (
     build_multi_assembly_trace_view,
     build_pairwise_assembly_trace_view,

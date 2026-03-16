@@ -9,7 +9,7 @@ import streamlit as st
 
 pytest.importorskip("streamlit")
 
-from abi_sauce.assembly import AssemblyConfig, MultiAssemblyResult
+from abi_sauce.assembly_types import AssemblyConfig, MultiAssemblyResult
 from abi_sauce.assembly_state import AssemblyDefinition
 from abi_sauce.assembly_trace import (
     build_assembly_trace_row_source,
@@ -17,12 +17,9 @@ from abi_sauce.assembly_trace import (
     build_pairwise_assembly_trace_view,
 )
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
-from abi_sauce.services.assembly import compute_saved_assemblies
-from abi_sauce.services.batch import (
-    ParsedBatch,
-    apply_trim_configs,
-    build_batch_signature,
-)
+from abi_sauce.services.assembly_compute import compute_saved_assemblies
+from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
+from abi_sauce.services.batch_trim import apply_trim_configs
 import abi_sauce.streamlit_cache as streamlit_cache
 from abi_sauce.streamlit_cache import (
     build_assembly_trace_row_source_for_member,

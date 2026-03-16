@@ -22,6 +22,22 @@ class AlignmentEvent:
     trace_x: int | None
     context_ref: str
     context_query: str
+    column_index: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceAlignmentColumn:
+    column_index: int
+    ref_base: str
+    query_base: str
+    event_type: str
+    ref_index: int | None
+    query_index: int | None
+    ref_pos: int | None
+    query_pos: int | None
+    qscore: int | None
+    trace_x: int | None
+    is_match: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +58,13 @@ class AlignmentResult:
     match_line: str
     aligned_query: str
     events: tuple[AlignmentEvent, ...]
+    columns: tuple[ReferenceAlignmentColumn, ...] = ()
 
 
 __all__ = [
     "StrandPolicy",
     "ChosenStrand",
     "AlignmentEvent",
+    "ReferenceAlignmentColumn",
     "AlignmentResult",
 ]

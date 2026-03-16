@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abi_sauce.assembly import AssemblyConfig
+from abi_sauce.assembly_types import AssemblyConfig
 from abi_sauce.assembly_state import (
     AssemblyDefinition,
     AssemblySessionState,
@@ -15,7 +15,7 @@ from abi_sauce.assembly_state import (
     update_assembly_definition,
 )
 from abi_sauce.models import SequenceUpload
-from abi_sauce.services.batch import build_batch_signature
+from abi_sauce.services.batch_parse import build_batch_signature
 
 
 def make_signature(*filenames: str):

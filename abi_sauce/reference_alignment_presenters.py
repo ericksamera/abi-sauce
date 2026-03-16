@@ -15,6 +15,7 @@ def alignment_events_to_rows(
             continue
         rows.append(
             {
+                "column": event.column_index,
                 "ref_pos": event.ref_pos,
                 "query_pos": event.query_pos,
                 "type": event.event_type,

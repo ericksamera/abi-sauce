@@ -17,6 +17,7 @@ from abi_sauce.reference_alignment_types import (
     AlignmentEvent,
     AlignmentResult,
     ChosenStrand,
+    ReferenceAlignmentColumn,
     StrandPolicy,
 )
 from abi_sauce.trace_coordinates import trace_position_for_oriented_query_index
@@ -26,7 +27,7 @@ _ALLOWED_REFERENCE_CHARACTERS = frozenset("ACGTURYKMSWBDHVN")
 
 
 def normalize_reference(reference_text: str) -> tuple[str, str]:
-    """Return a `(reference_name, sequence)` tuple from FASTA or plain text."""
+    """Return a ``(reference_name, sequence)`` tuple from FASTA or plain text."""
     lines = [line.strip() for line in reference_text.splitlines() if line.strip()]
     if not lines:
         raise ValueError("Reference sequence is empty.")
@@ -74,7 +75,7 @@ def align_trimmed_read_to_reference(
     aligner: Align.PairwiseAligner | None = None,
     context_window: int = 5,
 ) -> AlignmentResult:
-    """Align one trimmed read against a reference and return summary + event details."""
+    """Align one trimmed read against a reference and return summary + columns."""
     normalized_reference_name, reference_sequence = normalize_reference(reference_text)
     resolved_reference_name = (
         normalized_reference_name if reference_name is None else reference_name
@@ -105,6 +106,7 @@ def align_trimmed_read_to_reference(
         match_line,
         aligned_query,
         events,
+        columns,
         matches,
         mismatches,
         insertions,
@@ -144,6 +146,7 @@ def align_trimmed_read_to_reference(
         match_line=match_line,
         aligned_query=aligned_query,
         events=tuple(events),
+        columns=tuple(columns),
     )
 
 
@@ -162,6 +165,7 @@ def _extract_alignment_details(
     str,
     str,
     list[AlignmentEvent],
+    list[ReferenceAlignmentColumn],
     int,
     int,
     int,
@@ -179,6 +183,7 @@ def _extract_alignment_details(
     match_line_chars: list[str] = []
 
     events: list[AlignmentEvent] = []
+    columns: list[ReferenceAlignmentColumn] = []
     matches = 0
     mismatches = 0
     insertions = 0
@@ -188,7 +193,8 @@ def _extract_alignment_details(
     query_positions: list[int] = []
 
     for column_index, (target_index, query_index) in enumerate(
-        zip(target_indices, query_indices, strict=True)
+        zip(target_indices, query_indices, strict=True),
+        start=1,
     ):
         resolved_target_index = int(target_index)
         resolved_query_index = int(query_index)
@@ -240,7 +246,7 @@ def _extract_alignment_details(
         flank_q_left, flank_q_right = _flanking_qualities_for_column(
             oriented_query_qualities,
             query_indices,
-            column_index=column_index,
+            column_index=column_index - 1,
         )
         trace_x = trace_position_for_oriented_query_index(
             raw_record=raw_record,
@@ -252,15 +258,38 @@ def _extract_alignment_details(
         )
         context_ref = _context_window(
             reference_sequence,
-            _context_index_for_column(target_indices, column_index),
+            _context_index_for_column(target_indices, column_index - 1),
             window=context_window,
         )
         context_query = _context_window(
             oriented_query_sequence,
-            _context_index_for_column(query_indices, column_index),
+            _context_index_for_column(query_indices, column_index - 1),
             window=context_window,
         )
 
+        columns.append(
+            ReferenceAlignmentColumn(
+                column_index=column_index,
+                ref_base=ref_base,
+                query_base=query_base,
+                event_type=event_type,
+                ref_index=(
+                    None if resolved_target_index < 0 else resolved_target_index
+                ),
+                query_index=(
+                    None if resolved_query_index < 0 else resolved_query_index
+                ),
+                ref_pos=(
+                    None if resolved_target_index < 0 else resolved_target_index + 1
+                ),
+                query_pos=(
+                    None if resolved_query_index < 0 else resolved_query_index + 1
+                ),
+                qscore=qscore,
+                trace_x=trace_x,
+                is_match=event_type == "match",
+            )
+        )
         events.append(
             AlignmentEvent(
                 ref_pos=(
@@ -278,6 +307,7 @@ def _extract_alignment_details(
                 trace_x=trace_x,
                 context_ref=context_ref,
                 context_query=context_query,
+                column_index=column_index,
             )
         )
 
@@ -291,6 +321,7 @@ def _extract_alignment_details(
         "".join(match_line_chars),
         "".join(aligned_query_chars),
         events,
+        columns,
         matches,
         mismatches,
         insertions,
@@ -372,6 +403,7 @@ __all__ = [
     "StrandPolicy",
     "ChosenStrand",
     "AlignmentEvent",
+    "ReferenceAlignmentColumn",
     "AlignmentResult",
     "normalize_reference",
     "build_aligner",

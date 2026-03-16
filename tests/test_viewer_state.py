@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abi_sauce.services.batch import build_batch_signature
+from abi_sauce.services.batch_parse import build_batch_signature
 from abi_sauce.trim_state import BatchTrimState
 from abi_sauce.trimming import TrimConfig
 from abi_sauce.viewer_state import (

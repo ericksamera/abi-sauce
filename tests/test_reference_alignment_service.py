@@ -3,11 +3,8 @@ from __future__ import annotations
 import pytest
 
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
-from abi_sauce.services.batch import (
-    ParsedBatch,
-    apply_trim_configs,
-    build_batch_signature,
-)
+from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
+from abi_sauce.services.batch_trim import apply_trim_configs
 from abi_sauce.services.reference_alignment import compute_reference_alignment
 from abi_sauce.trimming import TrimConfig
 
@@ -75,8 +72,11 @@ def test_compute_reference_alignment_returns_page_facing_alignment_state() -> No
     assert computed_alignment.alignment_result.reference_name == "ref"
     assert computed_alignment.alignment_result.mismatch_count == 1
     assert len(computed_alignment.event_rows) == 1
+    assert computed_alignment.event_rows[0]["column"] == 4
     assert computed_alignment.event_rows[0]["type"] == "mismatch"
     assert computed_alignment.chromatogram_view.is_renderable is True
+    assert computed_alignment.trace_view is not None
+    assert computed_alignment.trace_view.alignment_length == 4
 
 
 def test_compute_reference_alignment_can_include_match_rows() -> None:
@@ -92,6 +92,7 @@ def test_compute_reference_alignment_can_include_match_rows() -> None:
 
     assert len(computed_alignment.event_rows) == 4
     assert all(row["type"] == "match" for row in computed_alignment.event_rows)
+    assert tuple(row["column"] for row in computed_alignment.event_rows) == (1, 2, 3, 4)
 
 
 def test_compute_reference_alignment_rejects_unknown_source_filename() -> None:

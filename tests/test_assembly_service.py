@@ -4,21 +4,20 @@ import io
 import json
 import zipfile
 
-from abi_sauce.assembly import AssemblyConfig, MultiAssemblyResult
+from abi_sauce.assembly_types import AssemblyConfig, MultiAssemblyResult
 from abi_sauce.assembly_state import AssemblyDefinition
 from abi_sauce.models import SequenceRecord, SequenceUpload, TraceData
-from abi_sauce.services.assembly import (
-    accepted_consensus_records,
+from abi_sauce.services.assembly_compute import (
     compute_saved_assemblies,
     compute_saved_assembly,
+)
+from abi_sauce.services.assembly_export import (
+    accepted_consensus_records,
     prepare_assembly_download,
     select_assembly_export,
 )
-from abi_sauce.services.batch import (
-    ParsedBatch,
-    apply_trim_configs,
-    build_batch_signature,
-)
+from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
+from abi_sauce.services.batch_trim import apply_trim_configs
 from abi_sauce.trimming import TrimConfig
 
 

@@ -15,6 +15,10 @@ def test_reference_alignment_module_reexports_types_and_presenters() -> None:
         is reference_alignment_types.AlignmentResult
     )
     assert (
+        reference_alignment_module.ReferenceAlignmentColumn
+        is reference_alignment_types.ReferenceAlignmentColumn
+    )
+    assert (
         reference_alignment_module.alignment_events_to_rows
         is reference_alignment_presenters.alignment_events_to_rows
     )

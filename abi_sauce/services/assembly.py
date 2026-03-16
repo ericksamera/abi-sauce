@@ -1,3 +1,5 @@
+"""Compatibility facade for legacy assembly-service imports."""
+
 from __future__ import annotations
 
 from abi_sauce.services.assembly_compute import (

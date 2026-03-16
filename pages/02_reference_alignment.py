@@ -9,6 +9,9 @@ from abi_sauce.chromatogram_figure import build_chromatogram_figure
 from abi_sauce.reference_alignment_presenters import (
     format_alignment_block,
 )
+from abi_sauce.reference_alignment_trace_figure import (
+    build_reference_alignment_trace_figure,
+)
 from abi_sauce.reference_alignment_types import StrandPolicy
 from abi_sauce.services.reference_alignment import compute_reference_alignment
 from abi_sauce.streamlit_cache import prepare_batch_for_trim_state
@@ -25,6 +28,11 @@ _REFERENCE_UPLOAD_KEY = "reference_alignment.reference_upload"
 _STRAND_POLICY_KEY = "reference_alignment.strand_policy"
 _SELECTED_RECORD_WIDGET_KEY = "reference_alignment.selected_record_widget"
 _SELECTED_EVENT_WIDGET_KEY = "reference_alignment.selected_event_widget"
+
+_ALIGNED_TRACE_ROW_HEIGHT_PX = 84
+_ALIGNED_TRACE_BASE_HEIGHT_PX = 72
+_ALIGNED_TRACE_MIN_HEIGHT_PX = 240
+_ALIGNED_TRACE_VISIBLE_COLUMNS = 150
 
 st.set_page_config(page_title="Reference Alignment", layout="wide")
 st.title("Reference Alignment")
@@ -71,6 +79,37 @@ def _centered_x_range(
     right = min(float(max(view.trace_length - 1, 0)), center + half_window)
     if right <= left:
         right = min(float(max(view.trace_length - 1, 0)), left + max(half_window, 1.0))
+    return [left, right]
+
+
+def _centered_alignment_x_range(
+    *,
+    alignment_length: int,
+    cell_width: float,
+    center_column_index: int | None,
+    visible_columns: int = _ALIGNED_TRACE_VISIBLE_COLUMNS,
+) -> list[float]:
+    if alignment_length <= 0:
+        return [0.0, 1.0]
+
+    full_left = 0.0
+    full_right = float(alignment_length) * cell_width
+    visible_width = min(float(visible_columns) * cell_width, full_right - full_left)
+    if visible_width <= 0:
+        return [full_left, full_right]
+
+    if center_column_index is None:
+        return [full_left, full_left + visible_width]
+
+    center = (float(center_column_index) - 0.5) * cell_width
+    half_width = visible_width / 2.0
+    left = max(full_left, center - half_width)
+    right = min(full_right, center + half_width)
+    if right - left < visible_width:
+        if left <= full_left:
+            right = min(full_right, left + visible_width)
+        elif right >= full_right:
+            left = max(full_left, right - visible_width)
     return [left, right]
 
 
@@ -254,12 +293,57 @@ else:
         "No mismatch or indel events were detected in the best-scoring alignment."
     )
 
+theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
+trace_view = computed_alignment.trace_view
+if trace_view is not None:
+    selected_column_index = (
+        None if selected_event_row is None else selected_event_row.get("column")
+    )
+    st.subheader("Aligned comparison")
+    st.caption(
+        "Top band shows the reference bases. The lower row shows the aligned "
+        "query bases together with the oriented electropherogram projected into "
+        "alignment columns."
+    )
+    aligned_trace_figure = build_reference_alignment_trace_figure(
+        trace_view,
+        theme_type=theme_type,
+        selected_column_index=(
+            int(selected_column_index)
+            if isinstance(selected_column_index, (int, float))
+            else None
+        ),
+    )
+    aligned_trace_figure.update_xaxes(
+        range=_centered_alignment_x_range(
+            alignment_length=trace_view.alignment_length,
+            cell_width=trace_view.cell_width,
+            center_column_index=(
+                int(selected_column_index)
+                if isinstance(selected_column_index, (int, float))
+                else None
+            ),
+        )
+    )
+    aligned_trace_figure.update_layout(
+        height=max(
+            _ALIGNED_TRACE_MIN_HEIGHT_PX,
+            _ALIGNED_TRACE_BASE_HEIGHT_PX
+            + (len(trace_view.rows) * _ALIGNED_TRACE_ROW_HEIGHT_PX),
+        ),
+        margin={"l": 24, "r": 24, "t": 24, "b": 56},
+    )
+    st.plotly_chart(
+        aligned_trace_figure,
+        width="stretch",
+        config={"scrollZoom": False},
+    )
+
 chromatogram_view = computed_alignment.chromatogram_view
 if not chromatogram_view.is_renderable:
     st.warning("Selected record does not have enough trace data to render a chart.")
     st.stop()
 
-theme_type = str(getattr(getattr(st.context, "theme", None), "type", "light"))
 figure = build_chromatogram_figure(
     chromatogram_view,
     theme_type=theme_type,
@@ -277,7 +361,7 @@ figure.update_layout(
     margin={"l": 24, "r": 24, "t": 24, "b": 24},
 )
 
-st.subheader("Chromatogram")
+st.subheader("Raw chromatogram")
 if selected_event_row is not None:
     if isinstance(trace_x, (int, float)):
         st.caption(f"Centered on trace sample {trace_x} for the selected event.")

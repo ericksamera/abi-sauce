@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from abi_sauce.assembly import (
-    AssemblyConfig,
-    assemble_trimmed_multi,
-    assemble_trimmed_pair,
-    assembly_conflicts_to_rows,
+from abi_sauce.assembly_exports import (
     consensus_record_from_multi_result,
     consensus_record_from_result,
     format_assembly_alignment_fasta,
 )
+from abi_sauce.assembly_multi import assemble_trimmed_multi
+from abi_sauce.assembly_pairwise import assemble_trimmed_pair
+from abi_sauce.assembly_presenters import assembly_conflicts_to_rows
+from abi_sauce.assembly_types import AssemblyConfig
 from abi_sauce.models import SequenceRecord, TraceData
 from abi_sauce.trimming import TrimConfig, trim_sequence_record
 

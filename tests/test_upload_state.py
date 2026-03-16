@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from abi_sauce.models import SequenceRecord, SequenceUpload
-from abi_sauce.services.batch import ParsedBatch, build_batch_signature
+from abi_sauce.services.batch_parse import ParsedBatch, build_batch_signature
 from abi_sauce.upload_state import (
     clear_active_batch,
     get_active_batch_signature,
